@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+set -eu
 
 # Wait for late USB-C/PD/EC power events after the initial mains event.
 START_DELAY_SECONDS=1

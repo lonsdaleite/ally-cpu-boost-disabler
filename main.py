@@ -27,8 +27,6 @@ BACKEND_DIR = "backend"
 SCRIPT_SRC = "refresh-cpu-cap.sh"
 SERVICE_SRC = "ally-cpu-boost-disabler-cap-refresh.service"
 UDEV_SRC = "99-ally-cpu-boost-disabler-cap-refresh.rules"
-INSTALL_SCRIPT_SRC = "install-daemon.sh"
-
 
 class Plugin:
     settings_path: str = ""
@@ -140,6 +138,15 @@ class Plugin:
         self.last_error = ""
         self.settings.pop("power_refresh_last_error", None)
 
+    def _copy_lf(self, src: str, dst: str, mode: int) -> None:
+        with open(src, "rb") as f:
+            data = f.read().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with open(dst, "wb") as f:
+            f.write(data)
+        os.chmod(dst, mode)
+        self._install_log(f"Copied {src} -> {dst}")
+
     def _power_refresh_install_status(self) -> dict:
         return {
             "script": os.path.exists(SCRIPT_DST),
@@ -192,37 +199,6 @@ class Plugin:
         )
         return False
 
-    async def _install_power_refresh_via_shell(self) -> bool:
-        install_script = self._backend_path(INSTALL_SCRIPT_SRC)
-        if not os.path.exists(install_script):
-            self._record_power_refresh_error(
-                f"Missing install script: {install_script}"
-            )
-            return False
-
-        env = os.environ.copy()
-        env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-        env["DECKY_PLUGIN_RUNTIME_DIR"] = decky.DECKY_PLUGIN_RUNTIME_DIR
-
-        self._install_log(f"Running shell installer: {install_script}")
-        result = subprocess.run(
-            ["/bin/bash", install_script],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
-        )
-        if result.stdout.strip():
-            self._install_log(result.stdout.strip())
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "").strip()
-            self._record_power_refresh_error(
-                f"install-daemon.sh failed (code {result.returncode})"
-                + (f": {detail}" if detail else "")
-            )
-            return False
-        return True
-
     async def install_power_refresh(self) -> bool:
         self.last_error = ""
         self._install_log("install_power_refresh: start")
@@ -231,21 +207,26 @@ class Plugin:
                 await self.save_settings()
                 return False
 
-            for src_name in (SCRIPT_SRC, SERVICE_SRC, UDEV_SRC, INSTALL_SCRIPT_SRC):
+            for src_name in (SCRIPT_SRC, SERVICE_SRC, UDEV_SRC):
                 src = self._backend_path(src_name)
                 if not os.path.exists(src):
                     self._record_power_refresh_error(f"Missing backend file: {src}")
                     await self.save_settings()
                     return False
 
-            if await self._install_power_refresh_via_shell():
-                self._clear_power_refresh_error()
-                await self.save_settings()
-                self._install_log("install_power_refresh: success")
-                return True
+            os.makedirs(SCRIPT_DST_DIR, exist_ok=True)
+            self._copy_lf(self._backend_path(SCRIPT_SRC), SCRIPT_DST, 0o755)
+            self._copy_lf(self._backend_path(SERVICE_SRC), SERVICE_DST, 0o644)
+            self._copy_lf(self._backend_path(UDEV_SRC), UDEV_DST, 0o644)
 
+            if not self._reload_systemd_udev():
+                await self.save_settings()
+                return False
+
+            self._clear_power_refresh_error()
             await self.save_settings()
-            return False
+            self._install_log("install_power_refresh: success")
+            return True
         except PermissionError:
             self._record_power_refresh_error(
                 "Permission denied writing to /var/lib or /etc. "
