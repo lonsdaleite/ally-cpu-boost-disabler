@@ -1,0 +1,70 @@
+# ally-cpu-boost-disabler
+
+Decky Loader plugin for ASUS ROG Ally X: disable CPU boost and optionally run a power-change workaround when boost is off.
+
+## Features
+
+- **CPU Boost** — toggle `/sys/devices/system/cpu/cpufreq/boost` on or off
+- **Refresh CPU cap on charger plug/unplug** — shown only when boost is disabled; installs a systemd/udev daemon that briefly nudges `scaling_max_freq` after AC plug/unplug (same idea as [ally-x-cpu-cap-refresh](https://github.com/lonsdaleite/ally-x-cpu-cap-refresh))
+
+When CPU boost is turned back on, the workaround daemon is removed automatically. If boost is disabled again and the second toggle was enabled, the daemon is reinstalled.
+
+## Install
+
+### From GitHub Release (recommended)
+
+1. Open [Releases](https://github.com/lonsdaleite/ally-cpu-boost-disabler/releases)
+2. Download `ally-cpu-boost-disabler-v1.0.0.zip` (or the latest zip)
+3. On the Ally: **Decky Loader → Settings → Developer → Install plugin from ZIP**
+4. Select the downloaded zip
+
+### Build from source
+
+```bash
+git clone https://github.com/lonsdaleite/ally-cpu-boost-disabler.git
+cd ally-cpu-boost-disabler
+npm install
+npm run build
+cp -r . "$HOME/homebrew/plugins/ally-cpu-boost-disabler"
+sudo systemctl restart plugin_loader
+```
+
+The plugin folder name must match `"name"` in `plugin.json`: `ally-cpu-boost-disabler`.
+
+## Requirements
+
+- [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)
+- ASUS ROG Ally X (or compatible device with `cpufreq/boost` sysfs node)
+- Plugin runs with **root** flag (required for sysfs and installing the workaround daemon)
+
+## Power refresh workaround
+
+Addresses an `amd-pstate-epp` / CPPC issue where, after plugging or unplugging the charger with boost disabled, CPU frequency caps may stop being enforced.
+
+The daemon runs on `AC0` mains power supply changes and executes:
+
+```text
+scaling_max_freq: current → current - 30 MHz → current
+```
+
+Installed files (only while the second toggle is on and boost is off):
+
+- `/var/lib/ally-cpu-boost-disabler/refresh-cpu-cap.sh`
+- `/etc/systemd/system/ally-cpu-boost-disabler-cap-refresh.service`
+- `/etc/udev/rules.d/99-ally-cpu-boost-disabler-cap-refresh.rules`
+
+Manual test:
+
+```bash
+sudo systemctl start ally-cpu-boost-disabler-cap-refresh.service
+journalctl -u ally-cpu-boost-disabler-cap-refresh.service --since "2 minutes ago" --no-pager
+```
+
+## Related projects
+
+- [ally-x-cpu-cap-refresh](https://github.com/lonsdaleite/ally-x-cpu-cap-refresh) — standalone workaround script
+- [allycenter](https://github.com/PixelAddictUnlocked/allycenter) — broader ROG Ally Decky control center (also has CPU boost toggle)
+
+## License
+
+MIT
