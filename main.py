@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -138,13 +139,50 @@ class Plugin:
         self.last_error = ""
         self.settings.pop("power_refresh_last_error", None)
 
-    def _copy_lf(self, src: str, dst: str, mode: int) -> None:
+    def _read_lf_bytes(self, src: str) -> bytes:
         with open(src, "rb") as f:
-            data = f.read().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            return f.read().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+    def _restore_selinux_context(self, path: str) -> None:
+        restorecon = shutil.which("restorecon")
+        if not restorecon:
+            return
+        result = subprocess.run(
+            [restorecon, "-F", path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            self._install_log(f"restorecon: {path}")
+
+    def _install_lf_file(self, src: str, dst: str, mode: int) -> bool:
+        install_bin = shutil.which("install") or "/usr/bin/install"
+        data = self._read_lf_bytes(src)
+        fd, tmp_path = tempfile.mkstemp(prefix="ally-cpu-boost-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            if not self._run_command(
+                [install_bin, "-m", oct(mode)[2:], tmp_path, dst]
+            ):
+                return False
+            self._install_log(f"Installed {src} -> {dst}")
+            self._restore_selinux_context(dst)
+            return True
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def _copy_lf(self, src: str, dst: str, mode: int) -> None:
+        data = self._read_lf_bytes(src)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         with open(dst, "wb") as f:
             f.write(data)
         os.chmod(dst, mode)
+        self._restore_selinux_context(dst)
         self._install_log(f"Copied {src} -> {dst}")
 
     def _power_refresh_install_status(self) -> dict:
@@ -215,7 +253,11 @@ class Plugin:
                     return False
 
             os.makedirs(SCRIPT_DST_DIR, exist_ok=True)
-            self._copy_lf(self._backend_path(SCRIPT_SRC), SCRIPT_DST, 0o755)
+            if not self._install_lf_file(
+                self._backend_path(SCRIPT_SRC), SCRIPT_DST, 0o755
+            ):
+                await self.save_settings()
+                return False
             self._copy_lf(self._backend_path(SERVICE_SRC), SERVICE_DST, 0o644)
             self._copy_lf(self._backend_path(UDEV_SRC), UDEV_DST, 0o644)
 
