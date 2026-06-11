@@ -307,25 +307,33 @@ class Plugin:
             decky.logger.error(f"Failed to set CPU boost: {e}")
             return False
 
-    async def set_power_refresh_enabled(self, enabled: bool) -> dict:
+    async def set_power_refresh_enabled(self, enabled: bool) -> str:
+        """Return empty string on success, otherwise an error message."""
         self.last_error = ""
+        decky.logger.info(
+            "set_power_refresh_enabled(%s) euid=%s boost=%s plugin_dir=%s",
+            enabled,
+            os.geteuid(),
+            self._read_boost_enabled(),
+            decky.DECKY_PLUGIN_DIR,
+        )
 
-        if self._read_boost_enabled():
-            return {
-                "ok": False,
-                "error": "Disable CPU boost before enabling power refresh.",
-            }
+        if enabled and self._read_boost_enabled():
+            error = self._record_power_refresh_error(
+                "Disable CPU boost before enabling power refresh."
+            )
+            await self.save_settings()
+            return error
 
-        if enabled and not os.path.exists(self._backend_path(SCRIPT_SRC)):
-            return {
-                "ok": False,
-                "error": (
-                    f"Plugin backend files missing at "
-                    f"{self._backend_path(SCRIPT_SRC)}. Reinstall the plugin zip."
-                ),
-            }
+        backend_script = self._backend_path(SCRIPT_SRC)
+        if enabled and not os.path.exists(backend_script):
+            error = self._record_power_refresh_error(
+                f"Plugin backend files missing at {backend_script}. "
+                "Reinstall the plugin zip and restart Decky."
+            )
+            await self.save_settings()
+            return error
 
-        previous = self.settings.get("power_refresh_enabled", False)
         if enabled:
             success = await self.install_power_refresh()
         else:
@@ -337,19 +345,19 @@ class Plugin:
                 self._clear_power_refresh_error()
             await self.save_settings()
             decky.logger.info(
-                f"Power refresh workaround {'enabled' if enabled else 'disabled'}"
+                "Power refresh workaround %s",
+                "enabled" if enabled else "disabled",
             )
-            return {"ok": True, "error": None}
+            return ""
 
         error = self.last_error or "Failed to change power refresh setting."
         self.settings["power_refresh_last_error"] = error
         await self.save_settings()
-        return {"ok": False, "error": error}
+        decky.logger.error("set_power_refresh_enabled failed: %s", error)
+        return error
 
-    async def retry_power_refresh_install(self) -> dict:
-        if self._read_boost_enabled():
-            return {
-                "ok": False,
-                "error": "Disable CPU boost before enabling power refresh.",
-            }
+    async def retry_power_refresh_install(self) -> str:
         return await self.set_power_refresh_enabled(True)
+
+    async def get_power_refresh_error(self) -> str:
+        return self.settings.get("power_refresh_last_error", self.last_error) or ""

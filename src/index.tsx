@@ -33,19 +33,39 @@ interface CpuSettings {
   log_path: string;
 }
 
-interface ActionResult {
-  ok: boolean;
-  error: string | null;
-}
-
 const getCpuSettings = callable<[], CpuSettings>("get_cpu_settings");
 const setCpuBoostEnabled = callable<[boolean], boolean>("set_cpu_boost_enabled");
-const setPowerRefreshEnabled = callable<[boolean], ActionResult>(
+const setPowerRefreshEnabled = callable<[boolean], string>(
   "set_power_refresh_enabled"
 );
-const retryPowerRefreshInstall = callable<[], ActionResult>(
+const retryPowerRefreshInstall = callable<[], string>(
   "retry_power_refresh_install"
 );
+const getPowerRefreshError = callable<[], string>("get_power_refresh_error");
+
+const parseActionError = (result: unknown): string | null => {
+  if (result === null || result === undefined) {
+    return "No response from plugin. Run: sudo systemctl restart plugin_loader";
+  }
+  if (typeof result === "string") {
+    return result.length > 0 ? result : null;
+  }
+  if (typeof result === "boolean") {
+    return result
+      ? null
+      : "Backend returned false. Restart Decky: sudo systemctl restart plugin_loader";
+  }
+  if (typeof result === "object") {
+    const legacy = result as { ok?: boolean; error?: string | null };
+    if (legacy.ok) {
+      return null;
+    }
+    if (legacy.error) {
+      return legacy.error;
+    }
+  }
+  return `Unexpected backend response: ${JSON.stringify(result)}`;
+};
 
 const PLUGIN_TITLE = "Ally CPU Boost Disabler";
 
@@ -103,7 +123,8 @@ const AllyCpuBoostContent: VFC = () => {
     setPowerRefreshEnabled(enabled);
     try {
       const result = await setPowerRefreshEnabled(enabled);
-      if (result?.ok) {
+      const error = parseActionError(result);
+      if (!error) {
         await refreshSettings();
         toaster.toast({
           title: PLUGIN_TITLE,
@@ -111,11 +132,13 @@ const AllyCpuBoostContent: VFC = () => {
             ? "Power refresh workaround enabled"
             : "Power refresh workaround disabled",
         });
-      } else {
-        setPowerRefreshEnabled(!enabled);
-        showError(result?.error || "Failed to change power refresh setting");
-        await refreshSettings();
+        return;
       }
+
+      setPowerRefreshEnabled(!enabled);
+      const savedError = await getPowerRefreshError().catch(() => "");
+      showError(savedError || error);
+      await refreshSettings();
     } catch (e) {
       setPowerRefreshEnabled(!enabled);
       showError(`Power refresh call failed: ${String(e)}`);
@@ -126,17 +149,20 @@ const AllyCpuBoostContent: VFC = () => {
   const handleRetryInstall = async () => {
     try {
       const result = await retryPowerRefreshInstall();
-      if (result?.ok) {
+      const error = parseActionError(result);
+      if (!error) {
         setPowerRefreshEnabled(true);
         await refreshSettings();
         toaster.toast({
           title: PLUGIN_TITLE,
           body: "Power refresh installed successfully",
         });
-      } else {
-        showError(result?.error || "Retry failed");
-        await refreshSettings();
+        return;
       }
+
+      const savedError = await getPowerRefreshError().catch(() => "");
+      showError(savedError || error);
+      await refreshSettings();
     } catch (e) {
       showError(`Retry failed: ${String(e)}`);
       await refreshSettings();
