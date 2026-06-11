@@ -303,13 +303,33 @@ class Plugin:
             decky.logger.error(f"Failed to read plugin version: {e}")
         return "unknown"
 
+    def _coerce_bool(self, value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
+
     async def get_cpu_settings(self) -> dict:
         await self._sync_boost_setting_from_sysfs()
         boost_enabled = self._read_boost_enabled()
         backend_script = self._backend_path(SCRIPT_SRC)
 
-        power_refresh_enabled = self.settings.get("power_refresh_enabled", False)
         power_refresh_installed = self._is_power_refresh_installed()
+        power_refresh_enabled = bool(
+            self.settings.get("power_refresh_enabled", False)
+        )
+
+        if (
+            power_refresh_installed
+            and not boost_enabled
+            and not power_refresh_enabled
+        ):
+            power_refresh_enabled = True
+            self.settings["power_refresh_enabled"] = True
+            await self.save_settings()
 
         return {
             "boost_enabled": boost_enabled,
@@ -355,8 +375,9 @@ class Plugin:
             decky.logger.error(f"Failed to set CPU boost: {e}")
             return False
 
-    async def apply_power_refresh_toggle(self, enabled: bool) -> int:
+    async def apply_power_refresh_toggle(self, enabled) -> int:
         """Fire-and-forget style action. Frontend must call get_cpu_settings() after."""
+        enabled = self._coerce_bool(enabled)
         self.last_error = ""
         self._install_log(
             f"apply_power_refresh_toggle({enabled}) euid={os.geteuid()} "

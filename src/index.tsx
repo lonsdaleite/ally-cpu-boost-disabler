@@ -43,9 +43,14 @@ const applyPowerRefreshToggle = callable<[boolean], number>(
   "apply_power_refresh_toggle"
 );
 
-const powerRefreshActionOk = (enabled: boolean, settings: CpuSettings) => {
+const powerRefreshMatchesIntent = (
+  enabled: boolean,
+  settings: CpuSettings
+) => {
   if (enabled) {
-    return settings.power_refresh_installed;
+    return (
+      settings.power_refresh_enabled && settings.power_refresh_installed
+    );
   }
   return (
     !settings.power_refresh_enabled && !settings.power_refresh_installed
@@ -58,7 +63,7 @@ const AllyCpuBoostContent: VFC = () => {
   const [cpuSettings, setCpuSettings] = useState<CpuSettings | null>(null);
   const [boostEnabled, setBoostEnabled] = useState(true);
   const [powerRefreshEnabled, setPowerRefreshEnabled] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [loading, setLoading] = useState(true);
 
   const refreshSettings = async () => {
@@ -67,9 +72,7 @@ const AllyCpuBoostContent: VFC = () => {
       setCpuSettings(data);
       setBoostEnabled(data.boost_enabled);
       setPowerRefreshEnabled(data.power_refresh_enabled);
-      if (data.power_refresh_last_error) {
-        setStatusMessage(data.power_refresh_last_error);
-      }
+      setErrorMessage(data.power_refresh_last_error || "");
     } catch (e) {
       console.error("Failed to get CPU settings:", e);
     }
@@ -101,46 +104,12 @@ const AllyCpuBoostContent: VFC = () => {
     }
   };
 
-  const showError = (message: string) => {
-    toaster.toast({
-      title: PLUGIN_TITLE,
-      body: message,
-    });
-  };
-
-  const applySettingsResult = (
-    enabled: boolean,
-    settings: CpuSettings
-  ) => {
-    setCpuSettings(settings);
-    setBoostEnabled(settings.boost_enabled);
-    setPowerRefreshEnabled(settings.power_refresh_enabled);
-
-    if (powerRefreshActionOk(enabled, settings)) {
-      setStatusMessage(
-        enabled
-          ? "Power refresh workaround enabled."
-          : "Power refresh workaround disabled."
-      );
-      return true;
-    }
-
-    setPowerRefreshEnabled(!enabled);
-    const parts = [
-      settings.power_refresh_last_error,
-      settings.install_debug_tail,
-    ].filter((part) => part && part.length > 0);
-    setStatusMessage(
-      parts.join("\n") || "Failed to change power refresh setting."
-    );
-    return false;
-  };
-
   const runPowerRefreshAction = async (enabled: boolean) => {
     setPowerRefreshEnabled(enabled);
-    setStatusMessage("Working...");
+    setErrorMessage("");
+
     try {
-      await applyPowerRefreshToggle(enabled).catch(() => 0);
+      await applyPowerRefreshToggle(enabled);
     } catch (e) {
       console.error("apply_power_refresh_toggle:", e);
     }
@@ -150,11 +119,32 @@ const AllyCpuBoostContent: VFC = () => {
       settings = await getCpuSettings();
     } catch (e) {
       setPowerRefreshEnabled(!enabled);
-      setStatusMessage(`get_cpu_settings failed: ${String(e)}`);
+      setErrorMessage(`get_cpu_settings failed: ${String(e)}`);
       return;
     }
 
-    applySettingsResult(enabled, settings);
+    setCpuSettings(settings);
+    setBoostEnabled(settings.boost_enabled);
+    setPowerRefreshEnabled(settings.power_refresh_enabled);
+
+    if (powerRefreshMatchesIntent(enabled, settings)) {
+      setErrorMessage("");
+      toaster.toast({
+        title: PLUGIN_TITLE,
+        body: enabled
+          ? "Power refresh workaround enabled."
+          : "Power refresh workaround disabled.",
+      });
+      return;
+    }
+
+    const parts = [
+      settings.power_refresh_last_error,
+      settings.install_debug_tail,
+    ].filter((part) => part && part.length > 0);
+    setErrorMessage(
+      parts.join("\n") || "Failed to change power refresh setting."
+    );
   };
 
   const handlePowerRefreshToggle = async (enabled: boolean) => {
@@ -245,17 +235,17 @@ const AllyCpuBoostContent: VFC = () => {
         </PanelSectionRow>
       )}
 
-      {statusMessage && (
+      {errorMessage && (
         <PanelSectionRow>
           <div
             style={{
-              color: statusMessage.includes("success") ? "#8b929a" : "#ff6b6b",
+              color: "#ff6b6b",
               fontSize: "12px",
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
             }}
           >
-            {statusMessage}
+            {errorMessage}
           </div>
         </PanelSectionRow>
       )}
