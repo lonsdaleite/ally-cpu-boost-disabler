@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import decky
 
@@ -259,6 +260,16 @@ class Plugin:
         await self._sync_power_refresh()
         decky.logger.info("Applied saved settings")
 
+    def _read_plugin_version(self) -> str:
+        try:
+            package_json = Path(decky.DECKY_PLUGIN_DIR) / "package.json"
+            if package_json.exists():
+                with open(package_json, "r", encoding="utf-8") as f:
+                    return json.load(f).get("version", "unknown")
+        except Exception as e:
+            decky.logger.error(f"Failed to read plugin version: {e}")
+        return "unknown"
+
     async def get_cpu_settings(self) -> dict:
         await self._sync_boost_setting_from_sysfs()
         boost_enabled = self._read_boost_enabled()
@@ -283,6 +294,7 @@ class Plugin:
             "plugin_dir": decky.DECKY_PLUGIN_DIR,
             "backend_script_path": backend_script,
             "log_path": decky.DECKY_PLUGIN_LOG,
+            "plugin_version": self._read_plugin_version(),
         }
 
     async def set_cpu_boost_enabled(self, enabled: bool) -> bool:
@@ -307,8 +319,7 @@ class Plugin:
             decky.logger.error(f"Failed to set CPU boost: {e}")
             return False
 
-    async def set_power_refresh_enabled(self, enabled: bool) -> str:
-        """Return empty string on success, otherwise an error message."""
+    async def set_power_refresh_enabled(self, enabled: bool) -> bool:
         self.last_error = ""
         decky.logger.info(
             "set_power_refresh_enabled(%s) euid=%s boost=%s plugin_dir=%s",
@@ -319,20 +330,20 @@ class Plugin:
         )
 
         if enabled and self._read_boost_enabled():
-            error = self._record_power_refresh_error(
+            self._record_power_refresh_error(
                 "Disable CPU boost before enabling power refresh."
             )
             await self.save_settings()
-            return error
+            return False
 
         backend_script = self._backend_path(SCRIPT_SRC)
         if enabled and not os.path.exists(backend_script):
-            error = self._record_power_refresh_error(
+            self._record_power_refresh_error(
                 f"Plugin backend files missing at {backend_script}. "
                 "Reinstall the plugin zip and restart Decky."
             )
             await self.save_settings()
-            return error
+            return False
 
         if enabled:
             success = await self.install_power_refresh()
@@ -348,16 +359,13 @@ class Plugin:
                 "Power refresh workaround %s",
                 "enabled" if enabled else "disabled",
             )
-            return ""
+            return True
 
         error = self.last_error or "Failed to change power refresh setting."
         self.settings["power_refresh_last_error"] = error
         await self.save_settings()
         decky.logger.error("set_power_refresh_enabled failed: %s", error)
-        return error
+        return False
 
-    async def retry_power_refresh_install(self) -> str:
+    async def retry_power_refresh_install(self) -> bool:
         return await self.set_power_refresh_enabled(True)
-
-    async def get_power_refresh_error(self) -> str:
-        return self.settings.get("power_refresh_last_error", self.last_error) or ""

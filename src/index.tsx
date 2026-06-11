@@ -31,41 +31,17 @@ interface CpuSettings {
   plugin_dir: string;
   backend_script_path: string;
   log_path: string;
+  plugin_version: string;
 }
 
 const getCpuSettings = callable<[], CpuSettings>("get_cpu_settings");
 const setCpuBoostEnabled = callable<[boolean], boolean>("set_cpu_boost_enabled");
-const setPowerRefreshEnabled = callable<[boolean], string>(
+const setPowerRefreshEnabled = callable<[boolean], boolean>(
   "set_power_refresh_enabled"
 );
-const retryPowerRefreshInstall = callable<[], string>(
+const retryPowerRefreshInstall = callable<[], boolean>(
   "retry_power_refresh_install"
 );
-const getPowerRefreshError = callable<[], string>("get_power_refresh_error");
-
-const parseActionError = (result: unknown): string | null => {
-  if (result === null || result === undefined) {
-    return "No response from plugin. Run: sudo systemctl restart plugin_loader";
-  }
-  if (typeof result === "string") {
-    return result.length > 0 ? result : null;
-  }
-  if (typeof result === "boolean") {
-    return result
-      ? null
-      : "Backend returned false. Restart Decky: sudo systemctl restart plugin_loader";
-  }
-  if (typeof result === "object") {
-    const legacy = result as { ok?: boolean; error?: string | null };
-    if (legacy.ok) {
-      return null;
-    }
-    if (legacy.error) {
-      return legacy.error;
-    }
-  }
-  return `Unexpected backend response: ${JSON.stringify(result)}`;
-};
 
 const PLUGIN_TITLE = "Ally CPU Boost Disabler";
 
@@ -73,6 +49,7 @@ const AllyCpuBoostContent: VFC = () => {
   const [cpuSettings, setCpuSettings] = useState<CpuSettings | null>(null);
   const [boostEnabled, setBoostEnabled] = useState(true);
   const [powerRefreshEnabled, setPowerRefreshEnabled] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
   const [loading, setLoading] = useState(true);
 
   const refreshSettings = async () => {
@@ -81,6 +58,9 @@ const AllyCpuBoostContent: VFC = () => {
       setCpuSettings(data);
       setBoostEnabled(data.boost_enabled);
       setPowerRefreshEnabled(data.power_refresh_enabled);
+      if (data.power_refresh_last_error) {
+        setStatusMessage(data.power_refresh_last_error);
+      }
     } catch (e) {
       console.error("Failed to get CPU settings:", e);
     }
@@ -121,50 +101,54 @@ const AllyCpuBoostContent: VFC = () => {
 
   const handlePowerRefreshToggle = async (enabled: boolean) => {
     setPowerRefreshEnabled(enabled);
+    setStatusMessage("");
     try {
-      const result = await setPowerRefreshEnabled(enabled);
-      const error = parseActionError(result);
-      if (!error) {
-        await refreshSettings();
-        toaster.toast({
-          title: PLUGIN_TITLE,
-          body: enabled
-            ? "Power refresh workaround enabled"
-            : "Power refresh workaround disabled",
-        });
+      const success = await setPowerRefreshEnabled(enabled);
+      await refreshSettings();
+
+      if (success === true) {
+        setStatusMessage(
+          enabled
+            ? "Power refresh workaround enabled."
+            : "Power refresh workaround disabled."
+        );
         return;
       }
 
       setPowerRefreshEnabled(!enabled);
-      const savedError = await getPowerRefreshError().catch(() => "");
-      showError(savedError || error);
-      await refreshSettings();
+      const latest = await getCpuSettings().catch(() => null);
+      const message =
+        latest?.power_refresh_last_error ||
+        (success === undefined || success === null
+          ? "Plugin backend not responding. Restart Decky: sudo systemctl restart plugin_loader"
+          : "Failed to change power refresh setting.");
+      setStatusMessage(message);
     } catch (e) {
       setPowerRefreshEnabled(!enabled);
-      showError(`Power refresh call failed: ${String(e)}`);
+      setStatusMessage(`Power refresh call failed: ${String(e)}`);
       await refreshSettings();
     }
   };
 
   const handleRetryInstall = async () => {
+    setStatusMessage("");
     try {
-      const result = await retryPowerRefreshInstall();
-      const error = parseActionError(result);
-      if (!error) {
+      const success = await retryPowerRefreshInstall();
+      await refreshSettings();
+
+      if (success === true) {
         setPowerRefreshEnabled(true);
-        await refreshSettings();
-        toaster.toast({
-          title: PLUGIN_TITLE,
-          body: "Power refresh installed successfully",
-        });
+        setStatusMessage("Power refresh installed successfully.");
         return;
       }
 
-      const savedError = await getPowerRefreshError().catch(() => "");
-      showError(savedError || error);
-      await refreshSettings();
+      const latest = await getCpuSettings().catch(() => null);
+      setStatusMessage(
+        latest?.power_refresh_last_error ||
+          "Retry failed. Check plugin log on device."
+      );
     } catch (e) {
-      showError(`Retry failed: ${String(e)}`);
+      setStatusMessage(`Retry failed: ${String(e)}`);
       await refreshSettings();
     }
   };
@@ -241,16 +225,6 @@ const AllyCpuBoostContent: VFC = () => {
         </PanelSectionRow>
       )}
 
-      {!boostEnabled &&
-        cpuSettings?.power_refresh_mismatch &&
-        cpuSettings.power_refresh_last_error && (
-          <PanelSectionRow>
-            <div style={{ color: "#ff6b6b", fontSize: "12px" }}>
-              {cpuSettings.power_refresh_last_error}
-            </div>
-          </PanelSectionRow>
-        )}
-
       {!boostEnabled && cpuSettings?.power_refresh_mismatch && (
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={handleRetryInstall}>
@@ -259,12 +233,27 @@ const AllyCpuBoostContent: VFC = () => {
         </PanelSectionRow>
       )}
 
-      {!boostEnabled && cpuSettings?.power_refresh_mismatch && (
+      {statusMessage && (
+        <PanelSectionRow>
+          <div
+            style={{
+              color: statusMessage.includes("success") ? "#8b929a" : "#ff6b6b",
+              fontSize: "12px",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {statusMessage}
+          </div>
+        </PanelSectionRow>
+      )}
+
+      {!boostEnabled && cpuSettings && (
         <PanelSectionRow>
           <div style={{ color: "#8b929a", fontSize: "11px" }}>
-            Debug: uid={cpuSettings.effective_uid}, root=
-            {cpuSettings.running_as_root ? "yes" : "no"}, backend=
-            {cpuSettings.power_refresh_available ? "ok" : "missing"}, files=
+            v{cpuSettings.plugin_version} | uid={cpuSettings.effective_uid} |
+            root={cpuSettings.running_as_root ? "yes" : "no"} | backend=
+            {cpuSettings.power_refresh_available ? "ok" : "missing"} | files=
             {cpuSettings.power_refresh_install_status.script ? "S" : "-"}
             {cpuSettings.power_refresh_install_status.service ? "s" : "-"}
             {cpuSettings.power_refresh_install_status.udev ? "u" : "-"}

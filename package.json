@@ -1,6 +1,6 @@
 {
   "name": "ally-cpu-boost-disabler",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Decky Loader plugin for ASUS ROG Ally CPU boost and CPU cap refresh workaround",
   "author": "lonsdaleite",
   "license": "MIT",
