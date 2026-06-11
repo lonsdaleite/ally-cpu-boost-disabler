@@ -1,0 +1,24 @@
+$ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
+
+$package = Get-Content package.json -Raw | ConvertFrom-Json
+$plugin = Get-Content plugin.json -Raw | ConvertFrom-Json
+$version = $package.version
+$pluginName = $plugin.name
+$stagingDir = Join-Path "release-staging" $pluginName
+$zipName = "$pluginName-v$version.zip"
+
+Write-Host "Building $pluginName v$version..."
+npm run build
+
+if (Test-Path release-staging) { Remove-Item -Recurse -Force release-staging }
+New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+
+Copy-Item -Recurse dist, backend, main.py, plugin.json, package.json, LICENSE, README.md -Destination $stagingDir
+
+Get-ChildItem "$pluginName-v*.zip" -ErrorAction SilentlyContinue | Remove-Item -Force
+Compress-Archive -Path (Join-Path release-staging $pluginName) -DestinationPath $zipName -Force
+
+Write-Host "Created $zipName"
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zipName)).Entries | ForEach-Object { $_.FullName }

@@ -16,9 +16,19 @@ When CPU boost is turned back on, the workaround daemon is removed automatically
 ### From GitHub Release (recommended)
 
 1. Open [Releases](https://github.com/lonsdaleite/ally-cpu-boost-disabler/releases)
-2. Download `ally-cpu-boost-disabler-v1.0.0.zip` (or the latest zip)
+2. Download the latest `ally-cpu-boost-disabler-v*.zip` from Releases (not the Source code archive)
 3. On the Xbox Ally X: **Decky Loader → Settings → Developer → Install plugin from ZIP**
 4. Select the downloaded zip
+
+Release zips must contain a top-level folder named like `plugin.json` → `"name"` (for example `ally-cpu-boost-disabler/plugin.json`). A flat zip with files in the archive root will not install via Decky.
+
+To build a release zip locally:
+
+```bash
+npm install
+./release.sh   # Linux / macOS / SteamOS
+# or: pwsh ./release.ps1
+```
 
 ### Build from source
 
