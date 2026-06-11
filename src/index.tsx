@@ -36,12 +36,21 @@ interface CpuSettings {
 
 const getCpuSettings = callable<[], CpuSettings>("get_cpu_settings");
 const setCpuBoostEnabled = callable<[boolean], boolean>("set_cpu_boost_enabled");
-const setPowerRefreshEnabled = callable<[boolean], boolean>(
+const setPowerRefreshEnabled = callable<[boolean], CpuSettings>(
   "set_power_refresh_enabled"
 );
-const retryPowerRefreshInstall = callable<[], boolean>(
+const retryPowerRefreshInstall = callable<[], CpuSettings>(
   "retry_power_refresh_install"
 );
+
+const powerRefreshActionOk = (enabled: boolean, settings: CpuSettings) => {
+  if (enabled) {
+    return settings.power_refresh_installed;
+  }
+  return (
+    !settings.power_refresh_enabled && !settings.power_refresh_installed
+  );
+};
 
 const PLUGIN_TITLE = "Ally CPU Boost Disabler";
 
@@ -99,30 +108,42 @@ const AllyCpuBoostContent: VFC = () => {
     });
   };
 
+  const applySettingsResult = (
+    enabled: boolean,
+    settings: CpuSettings | null | undefined
+  ) => {
+    if (!settings) {
+      setStatusMessage("Plugin backend not responding.");
+      return false;
+    }
+
+    setCpuSettings(settings);
+    setBoostEnabled(settings.boost_enabled);
+    setPowerRefreshEnabled(settings.power_refresh_enabled);
+
+    if (powerRefreshActionOk(enabled, settings)) {
+      setStatusMessage(
+        enabled
+          ? "Power refresh workaround enabled."
+          : "Power refresh workaround disabled."
+      );
+      return true;
+    }
+
+    setPowerRefreshEnabled(!enabled);
+    setStatusMessage(
+      settings.power_refresh_last_error ||
+        "Failed to change power refresh setting."
+    );
+    return false;
+  };
+
   const handlePowerRefreshToggle = async (enabled: boolean) => {
     setPowerRefreshEnabled(enabled);
-    setStatusMessage("");
+    setStatusMessage("Working...");
     try {
-      const success = await setPowerRefreshEnabled(enabled);
-      await refreshSettings();
-
-      if (success === true) {
-        setStatusMessage(
-          enabled
-            ? "Power refresh workaround enabled."
-            : "Power refresh workaround disabled."
-        );
-        return;
-      }
-
-      setPowerRefreshEnabled(!enabled);
-      const latest = await getCpuSettings().catch(() => null);
-      const message =
-        latest?.power_refresh_last_error ||
-        (success === undefined || success === null
-          ? "Plugin backend not responding. Restart Decky: sudo systemctl restart plugin_loader"
-          : "Failed to change power refresh setting.");
-      setStatusMessage(message);
+      const settings = await setPowerRefreshEnabled(enabled);
+      applySettingsResult(enabled, settings);
     } catch (e) {
       setPowerRefreshEnabled(!enabled);
       setStatusMessage(`Power refresh call failed: ${String(e)}`);
@@ -131,22 +152,12 @@ const AllyCpuBoostContent: VFC = () => {
   };
 
   const handleRetryInstall = async () => {
-    setStatusMessage("");
+    setStatusMessage("Working...");
     try {
-      const success = await retryPowerRefreshInstall();
-      await refreshSettings();
-
-      if (success === true) {
+      const settings = await retryPowerRefreshInstall();
+      if (applySettingsResult(true, settings)) {
         setPowerRefreshEnabled(true);
-        setStatusMessage("Power refresh installed successfully.");
-        return;
       }
-
-      const latest = await getCpuSettings().catch(() => null);
-      setStatusMessage(
-        latest?.power_refresh_last_error ||
-          "Retry failed. Check plugin log on device."
-      );
     } catch (e) {
       setStatusMessage(`Retry failed: ${String(e)}`);
       await refreshSettings();

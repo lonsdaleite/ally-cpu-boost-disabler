@@ -129,11 +129,14 @@ class Plugin:
 
     def _run_command(self, args: list[str]) -> bool:
         try:
+            env = os.environ.copy()
+            env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             result = subprocess.run(
                 args,
                 capture_output=True,
                 text=True,
                 check=False,
+                env=env,
             )
             if result.returncode != 0:
                 detail = (result.stderr or result.stdout or "").strip()
@@ -180,10 +183,17 @@ class Plugin:
                     return False
 
             os.makedirs(SCRIPT_DST_DIR, exist_ok=True)
+            decky.logger.info("Installing power refresh to %s", SCRIPT_DST_DIR)
+
             shutil.copy2(script_src, SCRIPT_DST)
             os.chmod(SCRIPT_DST, 0o755)
+            decky.logger.info("Installed script at %s", SCRIPT_DST)
+
             shutil.copy2(service_src, SERVICE_DST)
+            decky.logger.info("Installed service at %s", SERVICE_DST)
+
             shutil.copy2(udev_src, UDEV_DST)
+            decky.logger.info("Installed udev rule at %s", UDEV_DST)
 
             if not self._reload_systemd_udev():
                 self.settings["power_refresh_last_error"] = self.last_error
@@ -319,7 +329,8 @@ class Plugin:
             decky.logger.error(f"Failed to set CPU boost: {e}")
             return False
 
-    async def set_power_refresh_enabled(self, enabled: bool) -> bool:
+    async def set_power_refresh_enabled(self, enabled: bool) -> dict:
+        """Apply toggle and return fresh settings (dict IPC works reliably in Decky)."""
         self.last_error = ""
         decky.logger.info(
             "set_power_refresh_enabled(%s) euid=%s boost=%s plugin_dir=%s",
@@ -334,7 +345,7 @@ class Plugin:
                 "Disable CPU boost before enabling power refresh."
             )
             await self.save_settings()
-            return False
+            return await self.get_cpu_settings()
 
         backend_script = self._backend_path(SCRIPT_SRC)
         if enabled and not os.path.exists(backend_script):
@@ -343,7 +354,7 @@ class Plugin:
                 "Reinstall the plugin zip and restart Decky."
             )
             await self.save_settings()
-            return False
+            return await self.get_cpu_settings()
 
         if enabled:
             success = await self.install_power_refresh()
@@ -359,13 +370,13 @@ class Plugin:
                 "Power refresh workaround %s",
                 "enabled" if enabled else "disabled",
             )
-            return True
+        else:
+            error = self.last_error or "Failed to change power refresh setting."
+            self.settings["power_refresh_last_error"] = error
+            await self.save_settings()
+            decky.logger.error("set_power_refresh_enabled failed: %s", error)
 
-        error = self.last_error or "Failed to change power refresh setting."
-        self.settings["power_refresh_last_error"] = error
-        await self.save_settings()
-        decky.logger.error("set_power_refresh_enabled failed: %s", error)
-        return False
+        return await self.get_cpu_settings()
 
-    async def retry_power_refresh_install(self) -> bool:
+    async def retry_power_refresh_install(self) -> dict:
         return await self.set_power_refresh_enabled(True)
