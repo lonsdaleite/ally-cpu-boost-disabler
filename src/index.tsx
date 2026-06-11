@@ -16,11 +16,18 @@ interface CpuSettings {
   power_refresh_enabled: boolean;
   power_refresh_installed: boolean;
   power_refresh_available: boolean;
+  running_as_root: boolean;
+  backend_script_path: string;
+}
+
+interface ActionResult {
+  ok: boolean;
+  error: string | null;
 }
 
 const getCpuSettings = callable<[], CpuSettings>("get_cpu_settings");
 const setCpuBoostEnabled = callable<[boolean], boolean>("set_cpu_boost_enabled");
-const setPowerRefreshEnabled = callable<[boolean], boolean>(
+const setPowerRefreshEnabled = callable<[boolean], ActionResult>(
   "set_power_refresh_enabled"
 );
 
@@ -71,8 +78,8 @@ const AllyCpuBoostContent: VFC = () => {
 
   const handlePowerRefreshToggle = async (enabled: boolean) => {
     setPowerRefreshEnabled(enabled);
-    const success = await setPowerRefreshEnabled(enabled);
-    if (success) {
+    const result = await setPowerRefreshEnabled(enabled);
+    if (result.ok) {
       await refreshSettings();
       toaster.toast({
         title: PLUGIN_TITLE,
@@ -84,7 +91,7 @@ const AllyCpuBoostContent: VFC = () => {
       setPowerRefreshEnabled(!enabled);
       toaster.toast({
         title: PLUGIN_TITLE,
-        body: "Failed to change power refresh setting",
+        body: result.error || "Failed to change power refresh setting",
       });
     }
   };
@@ -133,12 +140,30 @@ const AllyCpuBoostContent: VFC = () => {
         </PanelSectionRow>
       )}
 
+      {!boostEnabled && cpuSettings && !cpuSettings.running_as_root && (
+        <PanelSectionRow>
+          <div style={{ color: "#b8860b", fontSize: "12px" }}>
+            Power refresh needs Decky backend as root. Run: sudo systemctl
+            restart plugin_loader
+          </div>
+        </PanelSectionRow>
+      )}
+
+      {!boostEnabled && !cpuSettings?.power_refresh_available && (
+        <PanelSectionRow>
+          <div style={{ color: "#b8860b", fontSize: "12px" }}>
+            Backend scripts missing in plugin install. Reinstall from the release
+            zip (v1.0.1+).
+          </div>
+        </PanelSectionRow>
+      )}
+
       {!boostEnabled && powerRefreshEnabled && cpuSettings && (
         <PanelSectionRow>
           <div style={{ color: "#8b929a", fontSize: "12px" }}>
             {cpuSettings.power_refresh_installed
               ? "Daemon active: refreshes scaling_max_freq after power changes"
-              : "Daemon not installed — toggle again or check plugin logs"}
+              : "Daemon not installed — see toast error or plugin logs"}
           </div>
         </PanelSectionRow>
       )}

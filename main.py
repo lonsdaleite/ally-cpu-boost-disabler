@@ -27,17 +27,46 @@ UDEV_SRC = "99-ally-cpu-boost-disabler-cap-refresh.rules"
 class Plugin:
     settings_path: str = ""
     settings: dict = {}
+    last_error: str = ""
 
     def _backend_path(self, filename: str) -> str:
         return os.path.join(decky.DECKY_PLUGIN_DIR, BACKEND_DIR, filename)
+
+    def _set_error(self, message: str) -> str:
+        self.last_error = message
+        decky.logger.error(message)
+        return message
+
+    def _read_boost_enabled(self) -> bool:
+        try:
+            if not os.path.exists(BOOST_PATH):
+                return True
+            with open(BOOST_PATH, "r", encoding="utf-8") as f:
+                return f.read().strip() == "1"
+        except Exception as e:
+            decky.logger.error(f"Failed to read CPU boost state: {e}")
+            return self.settings.get("cpu_boost_enabled", True)
+
+    async def _sync_boost_setting_from_sysfs(self):
+        if not os.path.exists(BOOST_PATH):
+            return
+        boost_enabled = self._read_boost_enabled()
+        if self.settings.get("cpu_boost_enabled") != boost_enabled:
+            self.settings["cpu_boost_enabled"] = boost_enabled
+            await self.save_settings()
 
     async def _main(self):
         self.settings_path = os.path.join(
             decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json"
         )
         await self.load_settings()
+        await self._sync_boost_setting_from_sysfs()
+        decky.logger.info(
+            "ally-cpu-boost-disabler initialized (euid=%s, plugin_dir=%s)",
+            os.geteuid(),
+            decky.DECKY_PLUGIN_DIR,
+        )
         await self._apply_settings()
-        decky.logger.info("ally-cpu-boost-disabler initialized")
 
     async def _unload(self):
         decky.logger.info("ally-cpu-boost-disabler unloaded")
@@ -78,52 +107,54 @@ class Plugin:
             and os.path.exists(UDEV_DST)
         )
 
-    def _run_systemctl(self, *args: str) -> bool:
+    def _run_command(self, args: list[str]) -> bool:
         try:
             result = subprocess.run(
-                ["systemctl", *args],
+                args,
                 capture_output=True,
                 text=True,
                 check=False,
             )
             if result.returncode != 0:
-                decky.logger.error(
-                    f"systemctl {' '.join(args)} failed: {result.stderr.strip()}"
+                detail = (result.stderr or result.stdout or "").strip()
+                self._set_error(
+                    f"{' '.join(args)} failed"
+                    + (f": {detail}" if detail else "")
                 )
                 return False
             return True
         except Exception as e:
-            decky.logger.error(f"systemctl {' '.join(args)} error: {e}")
+            self._set_error(f"{' '.join(args)} error: {e}")
             return False
 
     def _reload_systemd_udev(self) -> bool:
-        ok = self._run_systemctl("daemon-reload")
-        try:
-            result = subprocess.run(
-                ["udevadm", "control", "--reload-rules"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode != 0:
-                decky.logger.error(
-                    f"udevadm reload failed: {result.stderr.strip()}"
-                )
-                ok = False
-        except Exception as e:
-            decky.logger.error(f"udevadm reload error: {e}")
+        ok = self._run_command(["/usr/bin/systemctl", "daemon-reload"])
+        if not self._run_command(["/usr/bin/udevadm", "control", "--reload-rules"]):
             ok = False
         return ok
 
+    def _require_root_for_system_install(self) -> bool:
+        if os.geteuid() == 0:
+            return True
+        self._set_error(
+            "Power refresh install needs root. Ensure Decky runs as root "
+            "(sudo systemctl restart plugin_loader) and the plugin has the root flag."
+        )
+        return False
+
     async def install_power_refresh(self) -> bool:
+        self.last_error = ""
         try:
+            if not self._require_root_for_system_install():
+                return False
+
             script_src = self._backend_path(SCRIPT_SRC)
             service_src = self._backend_path(SERVICE_SRC)
             udev_src = self._backend_path(UDEV_SRC)
 
-            for path in (script_src, service_src, udev_src):
-                if not os.path.exists(path):
-                    decky.logger.error(f"Missing backend file: {path}")
+            for src in (script_src, service_src, udev_src):
+                if not os.path.exists(src):
+                    self._set_error(f"Missing backend file: {src}")
                     return False
 
             os.makedirs(SCRIPT_DST_DIR, exist_ok=True)
@@ -138,19 +169,24 @@ class Plugin:
             decky.logger.info("Installed power refresh workaround")
             return True
         except PermissionError:
-            decky.logger.error(
-                "Permission denied installing power refresh - requires root"
+            self._set_error(
+                "Permission denied writing to /var/lib or /etc. "
+                "Decky plugin backend must run as root."
             )
             return False
         except Exception as e:
-            decky.logger.error(f"Failed to install power refresh: {e}")
+            self._set_error(f"Failed to install power refresh: {e}")
             return False
 
     async def uninstall_power_refresh(self) -> bool:
+        self.last_error = ""
         try:
-            for path in (SCRIPT_DST, SERVICE_DST, UDEV_DST):
-                if os.path.exists(path):
-                    os.remove(path)
+            if not self._require_root_for_system_install():
+                return False
+
+            for target in (SCRIPT_DST, SERVICE_DST, UDEV_DST):
+                if os.path.exists(target):
+                    os.remove(target)
 
             if os.path.isdir(SCRIPT_DST_DIR) and not os.listdir(SCRIPT_DST_DIR):
                 os.rmdir(SCRIPT_DST_DIR)
@@ -162,16 +198,17 @@ class Plugin:
             decky.logger.info("Uninstalled power refresh workaround")
             return True
         except PermissionError:
-            decky.logger.error(
-                "Permission denied uninstalling power refresh - requires root"
+            self._set_error(
+                "Permission denied removing system files. "
+                "Decky plugin backend must run as root."
             )
             return False
         except Exception as e:
-            decky.logger.error(f"Failed to uninstall power refresh: {e}")
+            self._set_error(f"Failed to uninstall power refresh: {e}")
             return False
 
     async def _sync_power_refresh(self) -> bool:
-        boost_enabled = self.settings.get("cpu_boost_enabled", True)
+        boost_enabled = self._read_boost_enabled()
         want_refresh = (
             not boost_enabled and self.settings.get("power_refresh_enabled", False)
         )
@@ -190,26 +227,21 @@ class Plugin:
         decky.logger.info("Applied saved settings")
 
     async def get_cpu_settings(self) -> dict:
-        result = {
-            "boost_enabled": True,
+        await self._sync_boost_setting_from_sysfs()
+        boost_enabled = self._read_boost_enabled()
+        backend_script = self._backend_path(SCRIPT_SRC)
+
+        return {
+            "boost_enabled": boost_enabled,
             "boost_available": os.path.exists(BOOST_PATH),
             "power_refresh_enabled": self.settings.get(
                 "power_refresh_enabled", False
             ),
             "power_refresh_installed": self._is_power_refresh_installed(),
-            "power_refresh_available": os.path.exists(
-                self._backend_path(SCRIPT_SRC)
-            ),
+            "power_refresh_available": os.path.exists(backend_script),
+            "running_as_root": os.geteuid() == 0,
+            "backend_script_path": backend_script,
         }
-
-        try:
-            if os.path.exists(BOOST_PATH):
-                with open(BOOST_PATH, "r", encoding="utf-8") as f:
-                    result["boost_enabled"] = f.read().strip() == "1"
-        except Exception as e:
-            decky.logger.error(f"Failed to read CPU boost state: {e}")
-
-        return result
 
     async def set_cpu_boost_enabled(self, enabled: bool) -> bool:
         try:
@@ -233,23 +265,39 @@ class Plugin:
             decky.logger.error(f"Failed to set CPU boost: {e}")
             return False
 
-    async def set_power_refresh_enabled(self, enabled: bool) -> bool:
-        if self.settings.get("cpu_boost_enabled", True):
-            decky.logger.warning(
-                "Power refresh is only applicable when CPU boost is disabled"
-            )
-            return False
+    async def set_power_refresh_enabled(self, enabled: bool) -> dict:
+        self.last_error = ""
 
-        self.settings["power_refresh_enabled"] = enabled
-        await self.save_settings()
+        if self._read_boost_enabled():
+            return {
+                "ok": False,
+                "error": "Disable CPU boost before enabling power refresh.",
+            }
 
+        if enabled and not os.path.exists(self._backend_path(SCRIPT_SRC)):
+            return {
+                "ok": False,
+                "error": (
+                    f"Plugin backend files missing at "
+                    f"{self._backend_path(SCRIPT_SRC)}. Reinstall the plugin zip."
+                ),
+            }
+
+        previous = self.settings.get("power_refresh_enabled", False)
         if enabled:
             success = await self.install_power_refresh()
         else:
             success = await self.uninstall_power_refresh()
 
         if success:
+            self.settings["power_refresh_enabled"] = enabled
+            await self.save_settings()
             decky.logger.info(
                 f"Power refresh workaround {'enabled' if enabled else 'disabled'}"
             )
-        return success
+            return {"ok": True, "error": None}
+
+        return {
+            "ok": False,
+            "error": self.last_error or "Failed to change power refresh setting.",
+        }
