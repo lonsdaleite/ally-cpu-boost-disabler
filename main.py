@@ -10,6 +10,9 @@ import subprocess
 
 import decky
 
+SYSTEMCTL = shutil.which("systemctl") or "/usr/bin/systemctl"
+UDEVADM = shutil.which("udevadm") or "/usr/bin/udevadm"
+
 BOOST_PATH = "/sys/devices/system/cpu/cpufreq/boost"
 
 SCRIPT_DST_DIR = "/var/lib/ally-cpu-boost-disabler"
@@ -100,6 +103,22 @@ class Plugin:
         except Exception as e:
             decky.logger.error(f"Failed to save settings: {e}")
 
+    def _record_power_refresh_error(self, message: str):
+        self._set_error(message)
+        self.settings["power_refresh_last_error"] = message
+        return message
+
+    def _clear_power_refresh_error(self):
+        self.last_error = ""
+        self.settings.pop("power_refresh_last_error", None)
+
+    def _power_refresh_install_status(self) -> dict:
+        return {
+            "script": os.path.exists(SCRIPT_DST),
+            "service": os.path.exists(SERVICE_DST),
+            "udev": os.path.exists(UDEV_DST),
+        }
+
     def _is_power_refresh_installed(self) -> bool:
         return (
             os.path.exists(SCRIPT_DST)
@@ -128,15 +147,15 @@ class Plugin:
             return False
 
     def _reload_systemd_udev(self) -> bool:
-        ok = self._run_command(["/usr/bin/systemctl", "daemon-reload"])
-        if not self._run_command(["/usr/bin/udevadm", "control", "--reload-rules"]):
+        ok = self._run_command([SYSTEMCTL, "daemon-reload"])
+        if not self._run_command([UDEVADM, "control", "--reload-rules"]):
             ok = False
         return ok
 
     def _require_root_for_system_install(self) -> bool:
         if os.geteuid() == 0:
             return True
-        self._set_error(
+        self._record_power_refresh_error(
             "Power refresh install needs root. Ensure Decky runs as root "
             "(sudo systemctl restart plugin_loader) and the plugin has the root flag."
         )
@@ -146,6 +165,7 @@ class Plugin:
         self.last_error = ""
         try:
             if not self._require_root_for_system_install():
+                await self.save_settings()
                 return False
 
             script_src = self._backend_path(SCRIPT_SRC)
@@ -154,7 +174,8 @@ class Plugin:
 
             for src in (script_src, service_src, udev_src):
                 if not os.path.exists(src):
-                    self._set_error(f"Missing backend file: {src}")
+                    self._record_power_refresh_error(f"Missing backend file: {src}")
+                    await self.save_settings()
                     return False
 
             os.makedirs(SCRIPT_DST_DIR, exist_ok=True)
@@ -164,18 +185,24 @@ class Plugin:
             shutil.copy2(udev_src, UDEV_DST)
 
             if not self._reload_systemd_udev():
+                self.settings["power_refresh_last_error"] = self.last_error
+                await self.save_settings()
                 return False
 
+            self._clear_power_refresh_error()
+            await self.save_settings()
             decky.logger.info("Installed power refresh workaround")
             return True
         except PermissionError:
-            self._set_error(
+            self._record_power_refresh_error(
                 "Permission denied writing to /var/lib or /etc. "
                 "Decky plugin backend must run as root."
             )
+            await self.save_settings()
             return False
         except Exception as e:
-            self._set_error(f"Failed to install power refresh: {e}")
+            self._record_power_refresh_error(f"Failed to install power refresh: {e}")
+            await self.save_settings()
             return False
 
     async def uninstall_power_refresh(self) -> bool:
@@ -215,7 +242,13 @@ class Plugin:
         installed = self._is_power_refresh_installed()
 
         if want_refresh and not installed:
-            return await self.install_power_refresh()
+            ok = await self.install_power_refresh()
+            if not ok:
+                decky.logger.error(
+                    "Power refresh auto-install failed on startup: %s",
+                    self.last_error,
+                )
+            return ok
         if not want_refresh and installed:
             return await self.uninstall_power_refresh()
         return True
@@ -231,16 +264,25 @@ class Plugin:
         boost_enabled = self._read_boost_enabled()
         backend_script = self._backend_path(SCRIPT_SRC)
 
+        power_refresh_enabled = self.settings.get("power_refresh_enabled", False)
+        power_refresh_installed = self._is_power_refresh_installed()
+
         return {
             "boost_enabled": boost_enabled,
             "boost_available": os.path.exists(BOOST_PATH),
-            "power_refresh_enabled": self.settings.get(
-                "power_refresh_enabled", False
-            ),
-            "power_refresh_installed": self._is_power_refresh_installed(),
+            "power_refresh_enabled": power_refresh_enabled,
+            "power_refresh_installed": power_refresh_installed,
             "power_refresh_available": os.path.exists(backend_script),
+            "power_refresh_mismatch": power_refresh_enabled and not power_refresh_installed,
+            "power_refresh_last_error": self.settings.get(
+                "power_refresh_last_error", self.last_error
+            ),
+            "power_refresh_install_status": self._power_refresh_install_status(),
             "running_as_root": os.geteuid() == 0,
+            "effective_uid": os.geteuid(),
+            "plugin_dir": decky.DECKY_PLUGIN_DIR,
             "backend_script_path": backend_script,
+            "log_path": decky.DECKY_PLUGIN_LOG,
         }
 
     async def set_cpu_boost_enabled(self, enabled: bool) -> bool:
@@ -291,13 +333,23 @@ class Plugin:
 
         if success:
             self.settings["power_refresh_enabled"] = enabled
+            if not enabled:
+                self._clear_power_refresh_error()
             await self.save_settings()
             decky.logger.info(
                 f"Power refresh workaround {'enabled' if enabled else 'disabled'}"
             )
             return {"ok": True, "error": None}
 
-        return {
-            "ok": False,
-            "error": self.last_error or "Failed to change power refresh setting.",
-        }
+        error = self.last_error or "Failed to change power refresh setting."
+        self.settings["power_refresh_last_error"] = error
+        await self.save_settings()
+        return {"ok": False, "error": error}
+
+    async def retry_power_refresh_install(self) -> dict:
+        if self._read_boost_enabled():
+            return {
+                "ok": False,
+                "error": "Disable CPU boost before enabling power refresh.",
+            }
+        return await self.set_power_refresh_enabled(True)

@@ -73,6 +73,40 @@ sudo systemctl start ally-cpu-boost-disabler-cap-refresh.service
 journalctl -u ally-cpu-boost-disabler-cap-refresh.service --since "2 minutes ago" --no-pager
 ```
 
+## Debugging power refresh install
+
+If the UI shows **Daemon not installed** with no toast, the install likely failed during plugin startup. From desktop terminal:
+
+```bash
+# Plugin log (path also shown in plugin debug line)
+tail -n 80 ~/homebrew/logs/Ally\ CPU\ Boost\ Disabler/plugin.log
+
+# Decky loader log
+journalctl -u plugin_loader --since "15 minutes ago" | grep -iE "ally|power refresh|Permission|Missing backend"
+
+# Saved plugin settings (includes last error text)
+cat ~/homebrew/settings/Ally\ CPU\ Boost\ Disabler/settings.json
+
+# Check whether daemon files exist
+ls -la /var/lib/ally-cpu-boost-disabler/
+ls -la /etc/systemd/system/ally-cpu-boost-disabler-cap-refresh.service
+ls -la /etc/udev/rules.d/99-ally-cpu-boost-disabler-cap-refresh.rules
+
+# Check plugin backend files inside the install
+ls -la ~/homebrew/plugins/Ally\ CPU\ Boost\ Disabler/backend/
+
+# Manual install (same as plugin does)
+cd /tmp
+curl -fsSL "https://github.com/lonsdaleite/ally-x-cpu-cap-refresh/archive/refs/heads/main.tar.gz" | sudo tar -xz -C /tmp
+# or copy from plugin backend/ and run install steps from ally-x-cpu-cap-refresh
+```
+
+Common causes:
+
+- Decky backend not root (`uid=0` required) → `sudo systemctl restart plugin_loader`
+- `backend/` missing from zip install → reinstall release zip v1.0.1+
+- `systemctl daemon-reload` failed → see error text in settings.json or plugin log
+
 ## Related projects
 
 - [ally-x-cpu-cap-refresh](https://github.com/lonsdaleite/ally-x-cpu-cap-refresh) — standalone workaround script

@@ -3,6 +3,7 @@ import {
   PanelSection,
   PanelSectionRow,
   ToggleField,
+  ButtonItem,
   staticClasses,
 } from "@decky/ui";
 import { callable, toaster } from "@decky/api";
@@ -10,14 +11,26 @@ import { callable, toaster } from "@decky/api";
 const { useState, useEffect } = window.SP_REACT;
 type VFC<P = {}> = (props: P) => JSX.Element | null;
 
+interface InstallStatus {
+  script: boolean;
+  service: boolean;
+  udev: boolean;
+}
+
 interface CpuSettings {
   boost_enabled: boolean;
   boost_available: boolean;
   power_refresh_enabled: boolean;
   power_refresh_installed: boolean;
   power_refresh_available: boolean;
+  power_refresh_mismatch: boolean;
+  power_refresh_last_error: string;
+  power_refresh_install_status: InstallStatus;
   running_as_root: boolean;
+  effective_uid: number;
+  plugin_dir: string;
   backend_script_path: string;
+  log_path: string;
 }
 
 interface ActionResult {
@@ -29,6 +42,9 @@ const getCpuSettings = callable<[], CpuSettings>("get_cpu_settings");
 const setCpuBoostEnabled = callable<[boolean], boolean>("set_cpu_boost_enabled");
 const setPowerRefreshEnabled = callable<[boolean], ActionResult>(
   "set_power_refresh_enabled"
+);
+const retryPowerRefreshInstall = callable<[], ActionResult>(
+  "retry_power_refresh_install"
 );
 
 const PLUGIN_TITLE = "Ally CPU Boost Disabler";
@@ -76,23 +92,54 @@ const AllyCpuBoostContent: VFC = () => {
     }
   };
 
+  const showError = (message: string) => {
+    toaster.toast({
+      title: PLUGIN_TITLE,
+      body: message,
+    });
+  };
+
   const handlePowerRefreshToggle = async (enabled: boolean) => {
     setPowerRefreshEnabled(enabled);
-    const result = await setPowerRefreshEnabled(enabled);
-    if (result.ok) {
-      await refreshSettings();
-      toaster.toast({
-        title: PLUGIN_TITLE,
-        body: enabled
-          ? "Power refresh workaround enabled"
-          : "Power refresh workaround disabled",
-      });
-    } else {
+    try {
+      const result = await setPowerRefreshEnabled(enabled);
+      if (result?.ok) {
+        await refreshSettings();
+        toaster.toast({
+          title: PLUGIN_TITLE,
+          body: enabled
+            ? "Power refresh workaround enabled"
+            : "Power refresh workaround disabled",
+        });
+      } else {
+        setPowerRefreshEnabled(!enabled);
+        showError(result?.error || "Failed to change power refresh setting");
+        await refreshSettings();
+      }
+    } catch (e) {
       setPowerRefreshEnabled(!enabled);
-      toaster.toast({
-        title: PLUGIN_TITLE,
-        body: result.error || "Failed to change power refresh setting",
-      });
+      showError(`Power refresh call failed: ${String(e)}`);
+      await refreshSettings();
+    }
+  };
+
+  const handleRetryInstall = async () => {
+    try {
+      const result = await retryPowerRefreshInstall();
+      if (result?.ok) {
+        setPowerRefreshEnabled(true);
+        await refreshSettings();
+        toaster.toast({
+          title: PLUGIN_TITLE,
+          body: "Power refresh installed successfully",
+        });
+      } else {
+        showError(result?.error || "Retry failed");
+        await refreshSettings();
+      }
+    } catch (e) {
+      showError(`Retry failed: ${String(e)}`);
+      await refreshSettings();
     }
   };
 
@@ -163,7 +210,38 @@ const AllyCpuBoostContent: VFC = () => {
           <div style={{ color: "#8b929a", fontSize: "12px" }}>
             {cpuSettings.power_refresh_installed
               ? "Daemon active: refreshes scaling_max_freq after power changes"
-              : "Daemon not installed — see toast error or plugin logs"}
+              : "Daemon not installed"}
+          </div>
+        </PanelSectionRow>
+      )}
+
+      {!boostEnabled &&
+        cpuSettings?.power_refresh_mismatch &&
+        cpuSettings.power_refresh_last_error && (
+          <PanelSectionRow>
+            <div style={{ color: "#ff6b6b", fontSize: "12px" }}>
+              {cpuSettings.power_refresh_last_error}
+            </div>
+          </PanelSectionRow>
+        )}
+
+      {!boostEnabled && cpuSettings?.power_refresh_mismatch && (
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={handleRetryInstall}>
+            Retry daemon install
+          </ButtonItem>
+        </PanelSectionRow>
+      )}
+
+      {!boostEnabled && cpuSettings?.power_refresh_mismatch && (
+        <PanelSectionRow>
+          <div style={{ color: "#8b929a", fontSize: "11px" }}>
+            Debug: uid={cpuSettings.effective_uid}, root=
+            {cpuSettings.running_as_root ? "yes" : "no"}, backend=
+            {cpuSettings.power_refresh_available ? "ok" : "missing"}, files=
+            {cpuSettings.power_refresh_install_status.script ? "S" : "-"}
+            {cpuSettings.power_refresh_install_status.service ? "s" : "-"}
+            {cpuSettings.power_refresh_install_status.udev ? "u" : "-"}
           </div>
         </PanelSectionRow>
       )}
