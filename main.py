@@ -28,6 +28,7 @@ BACKEND_DIR = "backend"
 SCRIPT_SRC = "refresh-cpu-cap.sh"
 SERVICE_SRC = "ally-cpu-boost-disabler-cap-refresh.service"
 UDEV_SRC = "99-ally-cpu-boost-disabler-cap-refresh.rules"
+INSTALL_SCRIPT_SRC = "install-daemon.sh"
 
 class Plugin:
     settings_path: str = ""
@@ -158,48 +159,16 @@ class Plugin:
                 env[key] = os.environ[key]
         return env
 
-    def _restore_selinux_context(self, path: str) -> None:
-        restorecon = shutil.which("restorecon")
-        if not restorecon:
-            return
-        result = subprocess.run(
-            [restorecon, "-F", path],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=self._system_command_env(),
-        )
-        if result.returncode == 0:
-            self._install_log(f"restorecon: {path}")
-
-    def _install_lf_file(self, src: str, dst: str, mode: int) -> bool:
-        install_bin = shutil.which("install") or "/usr/bin/install"
-        data = self._read_lf_bytes(src)
-        fd, tmp_path = tempfile.mkstemp(prefix="ally-cpu-boost-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(data)
-            if not self._run_command(
-                [install_bin, "-m", oct(mode)[2:], tmp_path, dst]
-            ):
-                return False
-            self._install_log(f"Installed {src} -> {dst}")
-            self._restore_selinux_context(dst)
-            return True
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-    def _copy_lf(self, src: str, dst: str, mode: int) -> None:
-        data = self._read_lf_bytes(src)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        with open(dst, "wb") as f:
-            f.write(data)
-        os.chmod(dst, mode)
-        self._restore_selinux_context(dst)
-        self._install_log(f"Copied {src} -> {dst}")
+    def _stage_backend_lf(self) -> str:
+        staging_dir = tempfile.mkdtemp(prefix="ally-cpu-boost-install-")
+        for name in (SCRIPT_SRC, SERVICE_SRC, UDEV_SRC, INSTALL_SCRIPT_SRC):
+            src = self._backend_path(name)
+            dst = os.path.join(staging_dir, name)
+            with open(dst, "wb") as f:
+                f.write(self._read_lf_bytes(src))
+            if name.endswith(".sh"):
+                os.chmod(dst, 0o755)
+        return staging_dir
 
     def _power_refresh_install_status(self) -> dict:
         return {
@@ -247,14 +216,7 @@ class Plugin:
     def _reload_systemd_udev(self) -> bool:
         if not self._run_command([SYSTEMCTL, "daemon-reload"]):
             return False
-        if not self._run_command(
-            [UDEVADM, "control", "--reload-rules"], record_error=False
-        ):
-            self._install_log(
-                "udev rules installed; reload udev manually if plug/unplug "
-                "does not trigger the service"
-            )
-        return True
+        return self._run_command([UDEVADM, "control", "--reload-rules"])
 
     def _require_root_for_system_install(self) -> bool:
         if os.geteuid() == 0:
@@ -273,25 +235,39 @@ class Plugin:
                 await self.save_settings()
                 return False
 
-            for src_name in (SCRIPT_SRC, SERVICE_SRC, UDEV_SRC):
-                src = self._backend_path(src_name)
-                if not os.path.exists(src):
-                    self._record_power_refresh_error(f"Missing backend file: {src}")
+            install_script = self._backend_path(INSTALL_SCRIPT_SRC)
+            if not os.path.exists(install_script):
+                self._record_power_refresh_error(
+                    f"Missing install script: {install_script}"
+                )
+                await self.save_settings()
+                return False
+
+            staging_dir = self._stage_backend_lf()
+            try:
+                staged_install = os.path.join(staging_dir, INSTALL_SCRIPT_SRC)
+                env = self._system_command_env()
+                env["DECKY_PLUGIN_RUNTIME_DIR"] = decky.DECKY_PLUGIN_RUNTIME_DIR
+                self._install_log(f"Running install-daemon.sh from {staging_dir}")
+                result = subprocess.run(
+                    ["/usr/bin/bash", staged_install],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=env,
+                )
+                if result.stdout.strip():
+                    self._install_log(result.stdout.strip())
+                if result.returncode != 0:
+                    detail = (result.stderr or result.stdout or "").strip()
+                    self._record_power_refresh_error(
+                        f"install-daemon.sh failed (code {result.returncode})"
+                        + (f": {detail}" if detail else "")
+                    )
                     await self.save_settings()
                     return False
-
-            os.makedirs(SCRIPT_DST_DIR, exist_ok=True)
-            if not self._install_lf_file(
-                self._backend_path(SCRIPT_SRC), SCRIPT_DST, 0o755
-            ):
-                await self.save_settings()
-                return False
-            self._copy_lf(self._backend_path(SERVICE_SRC), SERVICE_DST, 0o644)
-            self._copy_lf(self._backend_path(UDEV_SRC), UDEV_DST, 0o644)
-
-            if not self._reload_systemd_udev():
-                await self.save_settings()
-                return False
+            finally:
+                shutil.rmtree(staging_dir, ignore_errors=True)
 
             self._clear_power_refresh_error()
             await self.save_settings()

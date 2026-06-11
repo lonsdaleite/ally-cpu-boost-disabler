@@ -1,4 +1,1 @@
-# AC0 online/offline (plug and unplug). Do not filter on POWER_SUPPLY_TYPE==Mains:
-# on unplug TYPE is no longer Mains and the service would not start.
-ACTION=="change", SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_NAME}=="AC0", ATTR{online}=="1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="ally-cpu-boost-disabler-cap-refresh.service"
-ACTION=="change", SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_NAME}=="AC0", ATTR{online}=="0", TAG+="systemd", ENV{SYSTEMD_WANTS}+="ally-cpu-boost-disabler-cap-refresh.service"
+ACTION=="change", SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_NAME}=="AC0", ENV{POWER_SUPPLY_TYPE}=="Mains", TAG+="systemd", ENV{SYSTEMD_WANTS}+="ally-cpu-boost-disabler-cap-refresh.service"

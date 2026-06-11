@@ -3,5 +3,4 @@ Description=Refresh amd-pstate CPU cap after power source change (ally-cpu-boost
 
 [Service]
 Type=oneshot
-# Run via bash: SELinux on Bazzite/Fedora blocks executing scripts in /var/lib directly.
-ExecStart=/usr/bin/bash /var/lib/ally-cpu-boost-disabler/refresh-cpu-cap.sh
+ExecStart=/var/lib/ally-cpu-boost-disabler/refresh-cpu-cap.sh
