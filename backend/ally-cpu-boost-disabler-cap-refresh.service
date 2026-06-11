@@ -1,0 +1,6 @@
+[Unit]
+Description=Refresh amd-pstate CPU cap after power source change (ally-cpu-boost-disabler)
+
+[Service]
+Type=oneshot
+ExecStart=/var/lib/ally-cpu-boost-disabler/refresh-cpu-cap.sh

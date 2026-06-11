@@ -1,0 +1,11 @@
+{
+  "name": "ally-cpu-boost-disabler",
+  "author": "lonsdaleite",
+  "flags": ["root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["hardware", "rog-ally", "asus", "performance", "cpu"],
+    "description": "CPU boost toggle and power-change CPU cap refresh workaround for ROG Ally X.",
+    "image": ""
+  }
+}
