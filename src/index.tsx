@@ -31,16 +31,16 @@ interface CpuSettings {
   plugin_dir: string;
   backend_script_path: string;
   log_path: string;
+  install_log_path: string;
+  install_debug_tail: string;
+  settings_path: string;
   plugin_version: string;
 }
 
 const getCpuSettings = callable<[], CpuSettings>("get_cpu_settings");
 const setCpuBoostEnabled = callable<[boolean], boolean>("set_cpu_boost_enabled");
-const setPowerRefreshEnabled = callable<[boolean], CpuSettings>(
-  "set_power_refresh_enabled"
-);
-const retryPowerRefreshInstall = callable<[], CpuSettings>(
-  "retry_power_refresh_install"
+const applyPowerRefreshToggle = callable<[boolean], number>(
+  "apply_power_refresh_toggle"
 );
 
 const powerRefreshActionOk = (enabled: boolean, settings: CpuSettings) => {
@@ -110,13 +110,8 @@ const AllyCpuBoostContent: VFC = () => {
 
   const applySettingsResult = (
     enabled: boolean,
-    settings: CpuSettings | null | undefined
+    settings: CpuSettings
   ) => {
-    if (!settings) {
-      setStatusMessage("Plugin backend not responding.");
-      return false;
-    }
-
     setCpuSettings(settings);
     setBoostEnabled(settings.boost_enabled);
     setPowerRefreshEnabled(settings.power_refresh_enabled);
@@ -131,37 +126,43 @@ const AllyCpuBoostContent: VFC = () => {
     }
 
     setPowerRefreshEnabled(!enabled);
+    const parts = [
+      settings.power_refresh_last_error,
+      settings.install_debug_tail,
+    ].filter((part) => part && part.length > 0);
     setStatusMessage(
-      settings.power_refresh_last_error ||
-        "Failed to change power refresh setting."
+      parts.join("\n") || "Failed to change power refresh setting."
     );
     return false;
   };
 
-  const handlePowerRefreshToggle = async (enabled: boolean) => {
+  const runPowerRefreshAction = async (enabled: boolean) => {
     setPowerRefreshEnabled(enabled);
     setStatusMessage("Working...");
     try {
-      const settings = await setPowerRefreshEnabled(enabled);
-      applySettingsResult(enabled, settings);
+      await applyPowerRefreshToggle(enabled).catch(() => 0);
+    } catch (e) {
+      console.error("apply_power_refresh_toggle:", e);
+    }
+
+    let settings: CpuSettings;
+    try {
+      settings = await getCpuSettings();
     } catch (e) {
       setPowerRefreshEnabled(!enabled);
-      setStatusMessage(`Power refresh call failed: ${String(e)}`);
-      await refreshSettings();
+      setStatusMessage(`get_cpu_settings failed: ${String(e)}`);
+      return;
     }
+
+    applySettingsResult(enabled, settings);
+  };
+
+  const handlePowerRefreshToggle = async (enabled: boolean) => {
+    await runPowerRefreshAction(enabled);
   };
 
   const handleRetryInstall = async () => {
-    setStatusMessage("Working...");
-    try {
-      const settings = await retryPowerRefreshInstall();
-      if (applySettingsResult(true, settings)) {
-        setPowerRefreshEnabled(true);
-      }
-    } catch (e) {
-      setStatusMessage(`Retry failed: ${String(e)}`);
-      await refreshSettings();
-    }
+    await runPowerRefreshAction(true);
   };
 
   if (loading) {
