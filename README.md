@@ -1,4 +1,4 @@
-# ally-cpu-boost-disabler
+# Ally CPU Boost Disabler
 
 Decky Loader plugin for **ASUS ROG Xbox Ally X**: disable CPU boost and optionally run a power-change workaround when boost is off.
 
@@ -20,7 +20,7 @@ When CPU boost is turned back on, the workaround daemon is removed automatically
 3. On the Xbox Ally X: **Decky Loader → Settings → Developer → Install plugin from ZIP**
 4. Select the downloaded zip
 
-Release zips must contain a top-level folder named like `plugin.json` → `"name"` (for example `ally-cpu-boost-disabler/plugin.json`). A flat zip with files in the archive root will not install via Decky.
+Release zips must contain a top-level folder named like `plugin.json` → `"name"` (for example `Ally CPU Boost Disabler/plugin.json`). A flat zip with files in the archive root will not install via Decky.
 
 To build a release zip locally:
 
@@ -37,11 +37,11 @@ git clone https://github.com/lonsdaleite/ally-cpu-boost-disabler.git
 cd ally-cpu-boost-disabler
 npm install
 npm run build
-cp -r . "$HOME/homebrew/plugins/ally-cpu-boost-disabler"
+cp -r . "$HOME/homebrew/plugins/Ally CPU Boost Disabler"
 sudo systemctl restart plugin_loader
 ```
 
-The plugin folder name must match `"name"` in `plugin.json`: `ally-cpu-boost-disabler`.
+The plugin folder name must match `"name"` in `plugin.json`: `Ally CPU Boost Disabler`.
 
 ## Requirements
 

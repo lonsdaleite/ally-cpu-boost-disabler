@@ -31,7 +31,7 @@ const setPowerRefreshEnabled = callable<[boolean], ActionResult>(
   "set_power_refresh_enabled"
 );
 
-const PLUGIN_TITLE = "ally-cpu-boost-disabler";
+const PLUGIN_TITLE = "Ally CPU Boost Disabler";
 
 const AllyCpuBoostContent: VFC = () => {
   const [cpuSettings, setCpuSettings] = useState<CpuSettings | null>(null);

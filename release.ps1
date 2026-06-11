@@ -4,9 +4,10 @@ Set-Location $PSScriptRoot
 $package = Get-Content package.json -Raw | ConvertFrom-Json
 $plugin = Get-Content plugin.json -Raw | ConvertFrom-Json
 $version = $package.version
+$zipSlug = $package.name
 $pluginName = $plugin.name
 $stagingDir = Join-Path "release-staging" $pluginName
-$zipName = "$pluginName-v$version.zip"
+$zipName = "$zipSlug-v$version.zip"
 
 Write-Host "Building $pluginName v$version..."
 npm run build
@@ -16,7 +17,7 @@ New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
 
 Copy-Item -Recurse dist, backend, main.py, plugin.json, package.json, LICENSE, README.md -Destination $stagingDir
 
-Get-ChildItem "$pluginName-v*.zip" -ErrorAction SilentlyContinue | Remove-Item -Force
+Get-ChildItem "$zipSlug-v*.zip" -ErrorAction SilentlyContinue | Remove-Item -Force
 Compress-Archive -Path (Join-Path release-staging $pluginName) -DestinationPath $zipName -Force
 
 Write-Host "Created $zipName"
