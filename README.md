@@ -1,6 +1,8 @@
 # ally-cpu-boost-disabler
 
-Decky Loader plugin for ASUS ROG Ally X: disable CPU boost and optionally run a power-change workaround when boost is off.
+Decky Loader plugin for **ASUS ROG Xbox Ally X**: disable CPU boost and optionally run a power-change workaround when boost is off.
+
+> **Device:** this targets the **Xbox** Ally X (ROG Xbox Ally X), not the original ROG Ally or the non-Xbox ROG Ally X. The CPU cap refresh workaround was written for the amd-pstate / CPPC behavior seen on **Xbox Ally X** under SteamOS / Bazzite.
 
 ## Features
 
@@ -15,7 +17,7 @@ When CPU boost is turned back on, the workaround daemon is removed automatically
 
 1. Open [Releases](https://github.com/lonsdaleite/ally-cpu-boost-disabler/releases)
 2. Download `ally-cpu-boost-disabler-v1.0.0.zip` (or the latest zip)
-3. On the Ally: **Decky Loader → Settings → Developer → Install plugin from ZIP**
+3. On the Xbox Ally X: **Decky Loader → Settings → Developer → Install plugin from ZIP**
 4. Select the downloaded zip
 
 ### Build from source
@@ -34,12 +36,13 @@ The plugin folder name must match `"name"` in `plugin.json`: `ally-cpu-boost-dis
 ## Requirements
 
 - [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)
-- ASUS ROG Ally X (or compatible device with `cpufreq/boost` sysfs node)
+- **ASUS ROG Xbox Ally X** (SteamOS / Bazzite or similar Linux)
+- CPU boost sysfs node: `/sys/devices/system/cpu/cpufreq/boost` (may exist on other handhelds, but the power workaround is **Xbox Ally X–specific**)
 - Plugin runs with **root** flag (required for sysfs and installing the workaround daemon)
 
 ## Power refresh workaround
 
-Addresses an `amd-pstate-epp` / CPPC issue where, after plugging or unplugging the charger with boost disabled, CPU frequency caps may stop being enforced.
+On **ROG Xbox Ally X**, addresses an `amd-pstate-epp` / CPPC issue where, after plugging or unplugging the charger with boost disabled, CPU frequency caps may stop being enforced.
 
 The daemon runs on `AC0` mains power supply changes and executes:
 
