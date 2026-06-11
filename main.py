@@ -143,6 +143,21 @@ class Plugin:
         with open(src, "rb") as f:
             return f.read().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
 
+    def _system_command_env(self) -> dict:
+        """Clean env for system binaries.
+
+        Decky's PyInstaller runtime sets LD_LIBRARY_PATH to bundled OpenSSL,
+        which breaks systemctl/udevadm linked against the host libcrypto.
+        """
+        env = {
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+        }
+        for key in ("HOME", "USER", "LOGNAME", "SHELL"):
+            if key in os.environ:
+                env[key] = os.environ[key]
+        return env
+
     def _restore_selinux_context(self, path: str) -> None:
         restorecon = shutil.which("restorecon")
         if not restorecon:
@@ -152,6 +167,7 @@ class Plugin:
             capture_output=True,
             text=True,
             check=False,
+            env=self._system_command_env(),
         )
         if result.returncode == 0:
             self._install_log(f"restorecon: {path}")
@@ -199,34 +215,46 @@ class Plugin:
             and os.path.exists(UDEV_DST)
         )
 
-    def _run_command(self, args: list[str]) -> bool:
+    def _run_command(self, args: list[str], *, record_error: bool = True) -> bool:
         try:
-            env = os.environ.copy()
-            env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             result = subprocess.run(
                 args,
                 capture_output=True,
                 text=True,
                 check=False,
-                env=env,
+                env=self._system_command_env(),
             )
             if result.returncode != 0:
                 detail = (result.stderr or result.stdout or "").strip()
-                self._set_error(
+                message = (
                     f"{' '.join(args)} failed"
                     + (f": {detail}" if detail else "")
                 )
+                if record_error:
+                    self._set_error(message)
+                else:
+                    self._install_log(f"WARNING: {message}")
                 return False
             return True
         except Exception as e:
-            self._set_error(f"{' '.join(args)} error: {e}")
+            message = f"{' '.join(args)} error: {e}"
+            if record_error:
+                self._set_error(message)
+            else:
+                self._install_log(f"WARNING: {message}")
             return False
 
     def _reload_systemd_udev(self) -> bool:
-        ok = self._run_command([SYSTEMCTL, "daemon-reload"])
-        if not self._run_command([UDEVADM, "control", "--reload-rules"]):
-            ok = False
-        return ok
+        if not self._run_command([SYSTEMCTL, "daemon-reload"]):
+            return False
+        if not self._run_command(
+            [UDEVADM, "control", "--reload-rules"], record_error=False
+        ):
+            self._install_log(
+                "udev rules installed; reload udev manually if plug/unplug "
+                "does not trigger the service"
+            )
+        return True
 
     def _require_root_for_system_install(self) -> bool:
         if os.geteuid() == 0:
