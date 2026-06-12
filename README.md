@@ -13,6 +13,8 @@ When CPU boost is turned back on, the workaround daemon is removed automatically
 
 ## Install
 
+**One-line terminal install:** `curl -fsSL https://raw.githubusercontent.com/lonsdaleite/ally-cpu-boost-disabler/main/install.sh | bash`
+
 ### From GitHub Release (recommended)
 
 1. Open [Releases](https://github.com/lonsdaleite/ally-cpu-boost-disabler/releases)
