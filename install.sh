@@ -4,6 +4,7 @@ set -euo pipefail
 REPO="lonsdaleite/ally-cpu-boost-disabler"
 PLUGIN_NAME="Ally CPU Boost Disabler"
 PLUGINS_DIR="${HOME}/homebrew/plugins"
+PLUGIN_DIR="${PLUGINS_DIR}/${PLUGIN_NAME}"
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "curl is required." >&2
@@ -12,6 +13,11 @@ fi
 
 if ! command -v unzip >/dev/null 2>&1; then
   echo "unzip is required." >&2
+  exit 1
+fi
+
+if ! command -v sudo >/dev/null 2>&1; then
+  echo "sudo is required to install into ${PLUGINS_DIR} on Decky/Bazzite." >&2
   exit 1
 fi
 
@@ -36,13 +42,14 @@ fi
 echo "Downloading ${zip_url}"
 curl -fsSL -o "$zip_path" "$zip_url"
 
-mkdir -p "$PLUGINS_DIR"
-rm -rf "${PLUGINS_DIR}/${PLUGIN_NAME}"
+# Decky often owns ~/homebrew/plugins as root after prior installs.
+sudo mkdir -p "$PLUGINS_DIR"
+sudo rm -rf "$PLUGIN_DIR"
 
-echo "Installing to ${PLUGINS_DIR}/${PLUGIN_NAME}"
-unzip -q -o "$zip_path" -d "$PLUGINS_DIR"
+echo "Installing to ${PLUGIN_DIR}"
+sudo unzip -q -o "$zip_path" -d "$PLUGINS_DIR"
 
-if [[ ! -f "${PLUGINS_DIR}/${PLUGIN_NAME}/dist/index.js" ]]; then
+if ! sudo test -f "${PLUGIN_DIR}/dist/index.js"; then
   echo "Install failed: dist/index.js is missing." >&2
   exit 1
 fi
