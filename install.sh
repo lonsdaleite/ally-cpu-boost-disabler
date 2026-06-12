@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+INSTALL_SCRIPT_REV=2
+
 REPO="lonsdaleite/ally-cpu-boost-disabler"
 PLUGIN_NAME="Ally CPU Boost Disabler"
 PLUGINS_DIR="${HOME}/homebrew/plugins"
@@ -26,6 +28,7 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 zip_path="${tmpdir}/plugin.zip"
 
+echo "install.sh rev ${INSTALL_SCRIPT_REV}"
 echo "Fetching latest ${REPO} release..."
 release_json="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")"
 zip_url="$(
