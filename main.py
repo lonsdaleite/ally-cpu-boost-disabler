@@ -53,20 +53,14 @@ class Plugin:
             decky.logger.error(f"Failed to read CPU boost state: {e}")
             return self.settings.get("cpu_boost_enabled", True)
 
-    async def _sync_boost_setting_from_sysfs(self):
-        if not os.path.exists(BOOST_PATH):
-            return
-        boost_enabled = self._read_boost_enabled()
-        if self.settings.get("cpu_boost_enabled") != boost_enabled:
-            self.settings["cpu_boost_enabled"] = boost_enabled
-            await self.save_settings()
+    def _boost_enabled_from_settings(self) -> bool:
+        return bool(self.settings.get("cpu_boost_enabled", True))
 
     async def _main(self):
         self.settings_path = os.path.join(
             decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json"
         )
         await self.load_settings()
-        await self._sync_boost_setting_from_sysfs()
         decky.logger.info(
             "ally-cpu-boost-disabler initialized (euid=%s, plugin_dir=%s)",
             os.geteuid(),
@@ -315,7 +309,7 @@ class Plugin:
             return False
 
     async def _sync_power_refresh(self) -> bool:
-        boost_enabled = self._read_boost_enabled()
+        boost_enabled = self._boost_enabled_from_settings()
         want_refresh = (
             not boost_enabled and self.settings.get("power_refresh_enabled", False)
         )
@@ -359,8 +353,8 @@ class Plugin:
         return bool(value)
 
     async def get_cpu_settings(self) -> dict:
-        await self._sync_boost_setting_from_sysfs()
-        boost_enabled = self._read_boost_enabled()
+        boost_enabled = self._boost_enabled_from_settings()
+        boost_sysfs = self._read_boost_enabled()
         backend_script = self._backend_path(SCRIPT_SRC)
 
         power_refresh_installed = self._is_power_refresh_installed()
@@ -368,17 +362,10 @@ class Plugin:
             self.settings.get("power_refresh_enabled", False)
         )
 
-        if (
-            power_refresh_installed
-            and not boost_enabled
-            and not power_refresh_enabled
-        ):
-            power_refresh_enabled = True
-            self.settings["power_refresh_enabled"] = True
-            await self.save_settings()
-
         return {
             "boost_enabled": boost_enabled,
+            "boost_sysfs_enabled": boost_sysfs,
+            "boost_sysfs_mismatch": boost_enabled != boost_sysfs,
             "boost_available": os.path.exists(BOOST_PATH),
             "power_refresh_enabled": power_refresh_enabled,
             "power_refresh_installed": power_refresh_installed,
@@ -430,7 +417,7 @@ class Plugin:
             f"boost={self._read_boost_enabled()} plugin_dir={decky.DECKY_PLUGIN_DIR}"
         )
 
-        if enabled and self._read_boost_enabled():
+        if enabled and self._boost_enabled_from_settings():
             self._record_power_refresh_error(
                 "Disable CPU boost before enabling power refresh."
             )

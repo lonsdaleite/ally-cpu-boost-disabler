@@ -19,6 +19,8 @@ interface InstallStatus {
 
 interface CpuSettings {
   boost_enabled: boolean;
+  boost_sysfs_enabled: boolean;
+  boost_sysfs_mismatch: boolean;
   boost_available: boolean;
   power_refresh_enabled: boolean;
   power_refresh_installed: boolean;
@@ -199,6 +201,15 @@ const AllyCpuBoostContent: VFC = () => {
         </PanelSectionRow>
       )}
 
+      {cpuSettings?.boost_sysfs_mismatch && (
+        <PanelSectionRow>
+          <div style={{ color: "#b8860b", fontSize: "12px" }}>
+            Saved CPU boost setting could not be applied to hardware (sysfs
+            mismatch). Ensure Decky runs as root.
+          </div>
+        </PanelSectionRow>
+      )}
+
       {!boostEnabled && cpuSettings && !cpuSettings.running_as_root && (
         <PanelSectionRow>
           <div style={{ color: "#b8860b", fontSize: "12px" }}>
@@ -254,7 +265,8 @@ const AllyCpuBoostContent: VFC = () => {
         <PanelSectionRow>
           <div style={{ color: "#8b929a", fontSize: "11px" }}>
             v{cpuSettings.plugin_version} | uid={cpuSettings.effective_uid} |
-            root={cpuSettings.running_as_root ? "yes" : "no"} | backend=
+            root={cpuSettings.running_as_root ? "yes" : "no"} | sysfs=
+            {cpuSettings.boost_sysfs_enabled ? "on" : "off"} | backend=
             {cpuSettings.power_refresh_available ? "ok" : "missing"} | files=
             {cpuSettings.power_refresh_install_status.script ? "S" : "-"}
             {cpuSettings.power_refresh_install_status.service ? "s" : "-"}
