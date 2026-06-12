@@ -56,7 +56,7 @@ The plugin folder name must match `"name"` in `plugin.json`: `Ally CPU Boost Dis
 
 On **ROG Xbox Ally X**, addresses an `amd-pstate-epp` / CPPC issue where, after plugging or unplugging the charger with boost disabled, CPU frequency caps may stop being enforced.
 
-The daemon runs on `AC0` mains power supply changes and executes:
+The daemon runs on `AC0` mains power supply changes, runs the refresh script immediately, waits 15 seconds, then runs it again (late USB-C/PD events), each time executing:
 
 ```text
 scaling_max_freq: current → current - 30 MHz → current
