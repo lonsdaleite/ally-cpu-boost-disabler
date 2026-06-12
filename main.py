@@ -38,6 +38,14 @@ class Plugin:
     def _backend_path(self, filename: str) -> str:
         return os.path.join(decky.DECKY_PLUGIN_DIR, BACKEND_DIR, filename)
 
+    def _refresh_script_path(self) -> str | None:
+        if os.path.exists(SCRIPT_DST):
+            return SCRIPT_DST
+        bundled = self._backend_path(SCRIPT_SRC)
+        if os.path.exists(bundled):
+            return bundled
+        return None
+
     def _set_error(self, message: str) -> str:
         self.last_error = message
         decky.logger.error(message)
@@ -453,3 +461,59 @@ class Plugin:
         await self.save_settings()
         self._install_log(f"apply_power_refresh_toggle: failed: {error}")
         return 0
+
+    async def manual_refresh_cpu_cap(self) -> dict:
+        if self._boost_enabled_from_settings():
+            return {
+                "success": False,
+                "message": "Disable CPU boost before manual refresh.",
+            }
+
+        if os.geteuid() != 0:
+            return {
+                "success": False,
+                "message": (
+                    "Manual refresh needs root. Run: sudo systemctl restart "
+                    "plugin_loader"
+                ),
+            }
+
+        script_path = self._refresh_script_path()
+        if not script_path:
+            return {
+                "success": False,
+                "message": (
+                    "refresh-cpu-cap.sh not found. Reinstall the plugin zip "
+                    "and restart Decky."
+                ),
+            }
+
+        self._install_log(f"manual_refresh_cpu_cap: running {script_path}")
+        try:
+            result = subprocess.run(
+                ["/usr/bin/bash", script_path],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=self._system_command_env(),
+            )
+            output = (result.stdout or "").strip()
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "").strip()
+                message = (
+                    f"Manual refresh failed (code {result.returncode})"
+                    + (f": {detail}" if detail else "")
+                )
+                decky.logger.error(message)
+                self._install_log(f"manual_refresh_cpu_cap: {message}")
+                return {"success": False, "message": message}
+
+            message = output or "CPU cap refreshed."
+            decky.logger.info("Manual refresh: %s", message)
+            self._install_log(f"manual_refresh_cpu_cap: success: {message}")
+            return {"success": True, "message": message}
+        except Exception as e:
+            message = f"Manual refresh error: {e}"
+            decky.logger.error(message)
+            self._install_log(f"manual_refresh_cpu_cap: {message}")
+            return {"success": False, "message": message}

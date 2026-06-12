@@ -44,6 +44,10 @@ const setCpuBoostEnabled = callable<[boolean], boolean>("set_cpu_boost_enabled")
 const applyPowerRefreshToggle = callable<[boolean], number>(
   "apply_power_refresh_toggle"
 );
+const manualRefreshCpuCap = callable<
+  [],
+  { success: boolean; message: string }
+>("manual_refresh_cpu_cap");
 
 const powerRefreshMatchesIntent = (
   enabled: boolean,
@@ -67,6 +71,7 @@ const AllyCpuBoostContent: VFC = () => {
   const [powerRefreshEnabled, setPowerRefreshEnabled] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [manualRefreshBusy, setManualRefreshBusy] = useState(false);
 
   const refreshSettings = async () => {
     try {
@@ -155,6 +160,31 @@ const AllyCpuBoostContent: VFC = () => {
 
   const handleRetryInstall = async () => {
     await runPowerRefreshAction(true);
+  };
+
+  const handleManualRefresh = async () => {
+    setManualRefreshBusy(true);
+    setErrorMessage("");
+    try {
+      const result = await manualRefreshCpuCap();
+      toaster.toast({
+        title: PLUGIN_TITLE,
+        body: result.message,
+      });
+      if (!result.success) {
+        setErrorMessage(result.message);
+      }
+    } catch (e) {
+      const message = `Manual refresh failed: ${String(e)}`;
+      console.error(message);
+      setErrorMessage(message);
+      toaster.toast({
+        title: PLUGIN_TITLE,
+        body: message,
+      });
+    } finally {
+      setManualRefreshBusy(false);
+    }
   };
 
   if (loading) {
@@ -258,6 +288,18 @@ const AllyCpuBoostContent: VFC = () => {
           >
             {errorMessage}
           </div>
+        </PanelSectionRow>
+      )}
+
+      {!boostEnabled && (
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={handleManualRefresh}
+            disabled={manualRefreshBusy}
+          >
+            {manualRefreshBusy ? "Refreshing..." : "Manual refresh"}
+          </ButtonItem>
         </PanelSectionRow>
       )}
 
