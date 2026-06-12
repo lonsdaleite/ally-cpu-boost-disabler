@@ -38,13 +38,26 @@ class Plugin:
     def _backend_path(self, filename: str) -> str:
         return os.path.join(decky.DECKY_PLUGIN_DIR, BACKEND_DIR, filename)
 
-    def _refresh_script_path(self) -> str | None:
-        if os.path.exists(SCRIPT_DST):
-            return SCRIPT_DST
+    def _refresh_script_source(self) -> str | None:
         bundled = self._backend_path(SCRIPT_SRC)
         if os.path.exists(bundled):
             return bundled
+        if os.path.exists(SCRIPT_DST):
+            return SCRIPT_DST
         return None
+
+    def _stage_refresh_script_lf(self) -> tuple[str, str]:
+        """Return (staging_dir, staged_script_path) with LF line endings."""
+        source = self._refresh_script_source()
+        if not source:
+            raise FileNotFoundError("refresh-cpu-cap.sh not found")
+
+        staging_dir = tempfile.mkdtemp(prefix="ally-cpu-boost-refresh-")
+        staged = os.path.join(staging_dir, SCRIPT_SRC)
+        with open(staged, "wb") as f:
+            f.write(self._read_lf_bytes(source))
+        os.chmod(staged, 0o755)
+        return staging_dir, staged
 
     def _set_error(self, message: str) -> str:
         self.last_error = message
@@ -478,8 +491,9 @@ class Plugin:
                 ),
             }
 
-        script_path = self._refresh_script_path()
-        if not script_path:
+        try:
+            staging_dir, script_path = self._stage_refresh_script_lf()
+        except FileNotFoundError:
             return {
                 "success": False,
                 "message": (
@@ -488,7 +502,10 @@ class Plugin:
                 ),
             }
 
-        self._install_log(f"manual_refresh_cpu_cap: running {script_path}")
+        self._install_log(
+            f"manual_refresh_cpu_cap: running {script_path} "
+            f"(source={self._refresh_script_source()})"
+        )
         try:
             result = subprocess.run(
                 ["/usr/bin/bash", script_path],
@@ -517,3 +534,5 @@ class Plugin:
             decky.logger.error(message)
             self._install_log(f"manual_refresh_cpu_cap: {message}")
             return {"success": False, "message": message}
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)

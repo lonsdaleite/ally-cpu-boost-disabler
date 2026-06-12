@@ -23,6 +23,10 @@ mkdir -p "$STAGING_DIR"
 
 cp -r dist main.py plugin.json package.json LICENSE README.md backend "$STAGING_DIR/"
 
+while IFS= read -r -d '' script; do
+  sed -i 's/\r$//' "$script"
+done < <(find "$STAGING_DIR/backend" -name '*.sh' -print0)
+
 rm -f "${ZIP_SLUG}"-v*.zip
 (
   cd release-staging

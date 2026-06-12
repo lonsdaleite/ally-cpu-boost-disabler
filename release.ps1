@@ -21,6 +21,12 @@ New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
 
 Copy-Item -Recurse dist, backend, main.py, plugin.json, package.json, LICENSE, README.md -Destination $stagingDir
 
+Get-ChildItem (Join-Path $stagingDir "backend") -Filter "*.sh" | ForEach-Object {
+    $text = [System.IO.File]::ReadAllText($_.FullName) -replace "`r`n", "`n" -replace "`r", "`n"
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($_.FullName, $text, $utf8)
+}
+
 Get-ChildItem "$zipSlug-v*.zip" -ErrorAction SilentlyContinue | Remove-Item -Force
 Compress-Archive -Path (Join-Path release-staging $pluginName) -DestinationPath $zipName -Force
 
