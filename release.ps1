@@ -9,8 +9,12 @@ $pluginName = $plugin.name
 $stagingDir = Join-Path "release-staging" $pluginName
 $zipName = "$zipSlug-v$version.zip"
 
+if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+    throw "pnpm is required. Install with: npm i -g pnpm@9"
+}
+
 Write-Host "Building $pluginName v$version..."
-npm run build
+pnpm run build
 
 if (Test-Path release-staging) { Remove-Item -Recurse -Force release-staging }
 New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null

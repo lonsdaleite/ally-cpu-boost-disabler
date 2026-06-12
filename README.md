@@ -25,7 +25,7 @@ Release zips must contain a top-level folder named like `plugin.json` → `"name
 To build a release zip locally:
 
 ```bash
-npm install
+pnpm install
 ./release.sh   # Linux / macOS / SteamOS
 # or: pwsh ./release.ps1
 ```
@@ -35,8 +35,8 @@ npm install
 ```bash
 git clone https://github.com/lonsdaleite/ally-cpu-boost-disabler.git
 cd ally-cpu-boost-disabler
-npm install
-npm run build
+pnpm install
+pnpm run build
 cp -r . "$HOME/homebrew/plugins/Ally CPU Boost Disabler"
 sudo systemctl restart plugin_loader
 ```

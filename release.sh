@@ -10,8 +10,13 @@ PLUGIN_NAME="$(node -p "require('./plugin.json').name")"
 STAGING_DIR="release-staging/${PLUGIN_NAME}"
 ZIP_NAME="${ZIP_SLUG}-v${VERSION}.zip"
 
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "pnpm is required. Install with: npm i -g pnpm@9"
+  exit 1
+fi
+
 echo "Building ${PLUGIN_NAME} v${VERSION}..."
-npm run build
+pnpm run build
 
 rm -rf release-staging
 mkdir -p "$STAGING_DIR"
